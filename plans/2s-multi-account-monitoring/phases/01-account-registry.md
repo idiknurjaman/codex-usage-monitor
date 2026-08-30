@@ -1,6 +1,6 @@
 # Phase 01 — Account Registry
 
-**Status:** `blocked-by-phase-00`
+**Status:** `in-progress`
 **Goal:** introduce a stable multi-account domain model and move account identity/auth ownership out of the window renderer.
 
 ## Preconditions

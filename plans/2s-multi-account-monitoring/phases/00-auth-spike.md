@@ -1,6 +1,6 @@
 # Phase 00 — Auth Spike
 
-**Status:** `planned`
+**Status:** `complete/PASS`
 **Goal:** prove a safe, zero-inference mechanism for authenticating and reading rate limits for a second Codex account without mutating the user's working Codex state.
 
 ## Why this phase exists

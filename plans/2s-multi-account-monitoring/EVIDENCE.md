@@ -3,8 +3,8 @@
 ## Current state
 
 - **Plan:** `2s-multi-account-monitoring`
-- **Lifecycle:** `planned`
-- **Current phase:** `00-auth-spike`
+- **Lifecycle:** `in-progress`
+- **Current phase:** `01-account-registry`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1` until Phase 00 creates a newer implementation commit
@@ -296,11 +296,19 @@ The controlled A-refresh/B-refresh/deletion interval remains the authoritative m
 
 **Decision:** `READY FOR SOL GATE AUDIT`. The direct `codex-login` hypothesis is technically viable with `Keyring + Secrets` and passes the auth-only/A-B/restart/refresh/deletion runtime checks. SEC-01 is closed by owner attribution plus the controlled interval; SEC-02 is closed by the pinned Codex storage ownership and reciprocal refresh proof. This is a handoff to Sol, not authorization to begin Phase 01.
 
-**Next authorized action:** Sol audits this complete Phase 00 evidence checkpoint. Phase 01 remains forbidden until Sol's audit passes; no production dependency, account registry, polling, switching, or two-account UI work is authorized.
+**Next authorized action:** Sol's Phase 00 gate verdict is recorded below. Phase 01 is now the active phase; login UI, polling fan-out, switching, and later phases remain out of scope.
+
+#### Sol Phase 00 gate verdict
+
+- **Verdict:** `PASS`
+- **Phase 00:** `complete/PASS`
+- **Approved mechanism:** direct pinned `codex-login` at source SHA `94cbbddafc1776d5e377bca1b05932c697e82238`, using `AuthCredentialsStoreMode::Keyring` with `AuthKeyringBackendKind::Secrets`.
+- **Accepted boundary:** isolated credential-owned namespaces only; no normal Codex workspace ownership, no sessions/history/config ownership, and zero inference.
+- **Phase 01:** `in-progress` and authorized to begin. Login UI, polling fan-out, account switching, and Phase 02 work remain out of scope.
 
 ### Phase 01 — Account Registry
 
-**Status:** `blocked-by-phase-00`
+**Status:** `in-progress`
 
 Evidence pending.
 

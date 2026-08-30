@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring
 
-**Status:** `planned`
-**Current phase:** `00-auth-spike`
+**Status:** `in-progress`
+**Current phase:** `01-account-registry`
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 
@@ -86,7 +86,7 @@ At the authored checkpoint:
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Bar/Circle rendering of two accounts without regressions |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 01–05 are blocked until Phase 00 passes.
+Phase 00 has passed its Sol phase gate. Phases 02–05 remain blocked until their preceding phase passes.
 
 ## Hard stops
 
@@ -119,4 +119,4 @@ Existing unrelated Clippy warnings may be recorded, but the plan must introduce 
 
 ## Next authorized action
 
-Execute **Phase 00 only**. Do not build the account registry or multi-account UI until the auth spike has a recorded PASS decision.
+Execute **Phase 01 only**. Do not implement login UI, polling fan-out, account switching, or later phases.
