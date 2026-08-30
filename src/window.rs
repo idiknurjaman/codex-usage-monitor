@@ -1409,20 +1409,25 @@ fn set_startup_enabled(enable: bool) {
 
 // Dimensions matching the C# version
 const SEGMENT_W: i32 = 10;
-const SEGMENT_H: i32 = 13;
+const SEGMENT_H: i32 = 4;
 const SEGMENT_GAP: i32 = 1;
-const SEGMENT_COUNT: i32 = 10;
+const SEGMENT_COUNT: i32 = 12;
 
 const LEFT_DIVIDER_W: i32 = 3;
-const DIVIDER_RIGHT_MARGIN: i32 = 10;
+const DIVIDER_RIGHT_MARGIN: i32 = 7;
 const LABEL_WIDTH: i32 = 18;
-const LABEL_RIGHT_MARGIN: i32 = 10;
-const BAR_RIGHT_MARGIN: i32 = 4;
+const LABEL_RIGHT_MARGIN: i32 = 7;
+const BAR_RIGHT_MARGIN: i32 = 6;
 const TEXT_WIDTH: i32 = 62;
 const SIMPLIFIED_CHINESE_LABEL_WIDTH: i32 = 20;
 const SIMPLIFIED_CHINESE_TEXT_WIDTH: i32 = 126;
 const MODEL_RIGHT_MARGIN: i32 = 3;
 const RIGHT_MARGIN: i32 = 1;
+const ROW_HEIGHT: i32 = 16;
+const ROW_GAP: i32 = 2;
+const PRIMARY_TEXT_WIDTH: i32 = 30;
+const SEPARATOR_TEXT_X: i32 = 31;
+const SECONDARY_TEXT_X: i32 = 38;
 const WIDGET_HEIGHT: i32 = 46;
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
@@ -1529,7 +1534,7 @@ fn claude_accent_color() -> Color {
 
 fn codex_accent_color(is_dark: bool) -> Color {
     if is_dark {
-        Color::from_hex("#F5F5F5")
+        Color::from_hex("#F2F2F2")
     } else {
         Color::from_hex("#1F1F1F")
     }
@@ -1549,10 +1554,38 @@ fn claude_usage_text_color(is_dark: bool) -> Color {
 
 fn codex_usage_text_color(is_dark: bool) -> Color {
     if is_dark {
-        Color::from_hex("#F5F5F5")
+        Color::from_hex("#F2F2F2")
     } else {
         Color::from_hex("#1F1F1F")
     }
+}
+
+fn usage_primary_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#F2F2F2")
+    } else {
+        Color::from_hex("#1F1F1F")
+    }
+}
+
+fn usage_secondary_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#929292")
+    } else {
+        Color::from_hex("#707070")
+    }
+}
+
+fn usage_separator_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#686868")
+    } else {
+        Color::from_hex("#999999")
+    }
+}
+
+fn transparent_key_color() -> Color {
+    Color::from_hex("#010203")
 }
 
 fn antigravity_usage_text_color(is_dark: bool) -> Color {
@@ -1741,9 +1774,12 @@ pub fn run() {
             embedded = true;
         }
 
-        // If not embedded, fall back to topmost popup with SetLayeredWindowAttributes
+        // If not embedded, fall back to a topmost popup with the same
+        // transparent chroma key used by the embedded renderer.
         if !embedded {
-            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+            let key = transparent_key_color();
+            let _ =
+                SetLayeredWindowAttributes(hwnd, COLORREF(key.to_colorref()), 255, LWA_COLORKEY);
             let _ = SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
@@ -1817,8 +1853,8 @@ pub fn run() {
 }
 
 /// Render widget content and push to the layered window via UpdateLayeredWindow.
-/// Renders fully opaque with the actual taskbar background colour so that
-/// ClearType sub-pixel font rendering can be used for crisp, OS-native text.
+/// The chroma-key background becomes transparent so the widget blends with
+/// the native taskbar surface.
 fn render_layered() {
     refresh_dpi();
     let (
@@ -1901,11 +1937,7 @@ fn render_layered() {
     } else {
         Color::from_hex("#404040")
     };
-    let bg_color = if is_dark {
-        Color::from_hex("#1C1C1C")
-    } else {
-        Color::from_hex("#F3F3F3")
-    };
+    let bg_color = transparent_key_color();
 
     unsafe {
         let screen_dc = GetDC(hwnd);
@@ -1937,9 +1969,8 @@ fn render_layered() {
         let old_bmp = SelectObject(mem_dc, dib);
         let pixel_count = (width * height) as usize;
 
-        // Render once with the actual taskbar background colour.
-        // Using an opaque background lets us use CLEARTYPE_QUALITY for
-        // sub-pixel font rendering that matches the rest of the OS.
+        // Render against a chroma key, then make those pixels fully
+        // transparent so the taskbar remains the widget background.
         paint_content(
             mem_dc,
             width,
@@ -1972,14 +2003,13 @@ fn render_layered() {
             &antigravity_accent,
         );
 
-        // Background pixels → alpha 1 (nearly invisible but still hittable for right-click).
-        // Content pixels → fully opaque (preserves ClearType sub-pixel rendering).
+        // Background pixels → alpha 0. Content pixels → fully opaque.
         let bg_bgr = bg_color.to_colorref();
         let pixel_data = std::slice::from_raw_parts_mut(bits as *mut u32, pixel_count);
         for px in pixel_data.iter_mut() {
             let rgb = *px & 0x00FFFFFF;
             if rgb == bg_bgr {
-                *px = 0x01000000;
+                *px = 0;
             } else {
                 *px = rgb | 0xFF000000;
             }
@@ -2072,47 +2102,31 @@ fn paint_content(
         FillRect(hdc, &client_rect, bg_brush);
         let _ = DeleteObject(bg_brush);
 
-        // Left divider
-        let divider_h = sc(25);
+        // Subtle drag hint. The full left strip remains the hit area.
+        let divider_h = sc(18);
         let divider_top = (height - divider_h) / 2;
-        let divider_bottom = divider_top + divider_h;
-
-        let (div_left, div_right) = if is_dark {
-            ((80, 80, 80), (40, 40, 40))
+        let divider_color = if is_dark {
+            Color::from_hex("#484848")
         } else {
-            ((160, 160, 160), (230, 230, 230))
+            Color::from_hex("#B8B8B8")
         };
-
-        let left_brush = CreateSolidBrush(COLORREF(native_interop::colorref(
-            div_left.0, div_left.1, div_left.2,
-        )));
-        let left_rect = RECT {
-            left: 0,
+        let divider_brush = CreateSolidBrush(COLORREF(divider_color.to_colorref()));
+        let divider_rect = RECT {
+            left: sc(1),
             top: divider_top,
             right: sc(2),
-            bottom: divider_bottom,
+            bottom: divider_top + divider_h,
         };
-        FillRect(hdc, &left_rect, left_brush);
-        let _ = DeleteObject(left_brush);
-
-        let right_brush = CreateSolidBrush(COLORREF(native_interop::colorref(
-            div_right.0,
-            div_right.1,
-            div_right.2,
-        )));
-        let right_rect = RECT {
-            left: sc(2),
-            top: divider_top,
-            right: sc(3),
-            bottom: divider_bottom,
-        };
-        FillRect(hdc, &right_rect, right_brush);
-        let _ = DeleteObject(right_brush);
+        FillRect(hdc, &divider_rect, divider_brush);
+        let _ = DeleteObject(divider_brush);
 
         let content_x = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
-        let row2_y = height - sc(5) - sc(SEGMENT_H);
-        let row1_y = row2_y - sc(10) - sc(SEGMENT_H);
-        let single_row_y = (height - sc(SEGMENT_H)) / 2;
+        let row_height = sc(ROW_HEIGHT);
+        let row_gap = sc(ROW_GAP);
+        let rows_height = row_height * 2 + row_gap;
+        let row1_y = (height - rows_height) / 2;
+        let row2_y = row1_y + row_height + row_gap;
+        let single_row_y = (height - row_height) / 2;
 
         let _ = SetBkMode(hdc, TRANSPARENT);
         let _ = SetTextColor(hdc, COLORREF(text_color.to_colorref()));
@@ -2146,7 +2160,6 @@ fn paint_content(
                     single_row_y
                 },
                 is_dark,
-                text_color,
                 strings.session_window,
                 session_pct,
                 session_text,
@@ -2175,7 +2188,6 @@ fn paint_content(
                     single_row_y
                 },
                 is_dark,
-                text_color,
                 strings.weekly_window,
                 weekly_pct,
                 weekly_text,
@@ -3722,11 +3734,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
     } else {
         Color::from_hex("#404040")
     };
-    let bg_color = if is_dark {
-        Color::from_hex("#1C1C1C")
-    } else {
-        Color::from_hex("#F3F3F3")
-    };
+    let bg_color = transparent_key_color();
 
     unsafe {
         let mut client_rect = RECT::default();
@@ -3787,7 +3795,6 @@ fn draw_row(
     x: i32,
     y: i32,
     is_dark: bool,
-    text_color: &Color,
     label: &str,
     claude_percent: Option<f64>,
     claude_text: &str,
@@ -3805,34 +3812,38 @@ fn draw_row(
     label_width: i32,
     text_width: i32,
 ) {
-    let seg_h = sc(SEGMENT_H);
+    let row_height = sc(ROW_HEIGHT);
+    let bar_y = y + (row_height - sc(SEGMENT_H)) / 2;
     let active_models = active_model_count(show_claude_code, show_codex, show_antigravity);
     let segment_count = row_bar_segment_count(active_models);
     let use_model_text_colors = active_models > 1;
+    let primary_text_color = usage_primary_text_color(is_dark);
+    let secondary_text_color = usage_secondary_text_color(is_dark);
+    let separator_text_color = usage_separator_text_color(is_dark);
     let claude_value_color = if use_model_text_colors {
         claude_usage_text_color(is_dark)
     } else {
-        *text_color
+        primary_text_color
     };
     let codex_value_color = if use_model_text_colors {
         codex_usage_text_color(is_dark)
     } else {
-        *text_color
+        primary_text_color
     };
     let antigravity_value_color = if use_model_text_colors {
         antigravity_usage_text_color(is_dark)
     } else {
-        *text_color
+        primary_text_color
     };
 
     unsafe {
-        let _ = SetTextColor(hdc, COLORREF(text_color.to_colorref()));
+        let _ = SetTextColor(hdc, COLORREF(secondary_text_color.to_colorref()));
         let mut label_wide: Vec<u16> = label.encode_utf16().collect();
         let mut label_rect = RECT {
             left: x,
             top: y,
             right: x + sc(label_width),
-            bottom: y + seg_h,
+            bottom: y + row_height,
         };
         let _ = DrawTextW(
             hdc,
@@ -3846,13 +3857,15 @@ fn draw_row(
             draw_usage_bar(
                 hdc,
                 model_x,
-                y,
+                bar_y,
                 segment_count,
                 claude_percent,
                 claude_text,
                 claude_accent,
                 track,
                 &claude_value_color,
+                &secondary_text_color,
+                &separator_text_color,
                 text_width,
             );
             model_x += model_usage_width(segment_count, text_width) + sc(MODEL_RIGHT_MARGIN);
@@ -3861,13 +3874,15 @@ fn draw_row(
             draw_usage_bar(
                 hdc,
                 model_x,
-                y,
+                bar_y,
                 segment_count,
                 codex_percent,
                 codex_text,
                 codex_accent,
                 track,
                 &codex_value_color,
+                &secondary_text_color,
+                &separator_text_color,
                 text_width,
             );
             model_x += model_usage_width(segment_count, text_width) + sc(MODEL_RIGHT_MARGIN);
@@ -3876,13 +3891,15 @@ fn draw_row(
             draw_usage_bar(
                 hdc,
                 model_x,
-                y,
+                bar_y,
                 segment_count,
                 antigravity_percent,
                 antigravity_text,
                 antigravity_accent,
                 track,
                 &antigravity_value_color,
+                &secondary_text_color,
+                &separator_text_color,
                 text_width,
             );
         }
@@ -3905,6 +3922,8 @@ fn draw_usage_bar(
     accent: &Color,
     track: &Color,
     text_color: &Color,
+    secondary_text_color: &Color,
+    separator_text_color: &Color,
     text_width: i32,
 ) {
     let seg_w = sc(SEGMENT_W);
@@ -3923,8 +3942,7 @@ fn draw_usage_bar(
         draw_rounded_rect(hdc, &bar_rect, track, corner_r);
 
         if let Some(percent) = percent {
-            let percent_clamped = percent.clamp(0.0, 100.0);
-            let fill_width = (bar_width as f64 * percent_clamped / 100.0).round() as i32;
+            let fill_width = progress_fill_width(bar_width, Some(percent));
             if fill_width > 0 {
                 let fill_rect = RECT {
                     left: bar_x,
@@ -3950,14 +3968,64 @@ fn draw_usage_bar(
         }
 
         let text_x = bar_x + bar_width + sc(BAR_RIGHT_MARGIN);
+        let text_y = y - (sc(ROW_HEIGHT) - seg_h) / 2;
+        draw_usage_text(
+            hdc,
+            text_x,
+            text_y,
+            text,
+            text_color,
+            secondary_text_color,
+            separator_text_color,
+            text_width,
+        );
+    }
+}
+
+fn progress_fill_width(bar_width: i32, percent: Option<f64>) -> i32 {
+    let Some(percent) = percent else {
+        return 0;
+    };
+
+    (bar_width as f64 * percent.clamp(0.0, 100.0) / 100.0).round() as i32
+}
+
+fn draw_usage_text(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    text: &str,
+    primary_color: &Color,
+    secondary_color: &Color,
+    separator_color: &Color,
+    text_width: i32,
+) {
+    if let Some((primary, secondary)) = text.split_once('\u{00b7}') {
+        draw_text_segment(hdc, x, y, PRIMARY_TEXT_WIDTH, primary.trim(), primary_color);
+        draw_text_segment(hdc, x + sc(SEPARATOR_TEXT_X), y, 6, "·", separator_color);
+        draw_text_segment(
+            hdc,
+            x + sc(SECONDARY_TEXT_X),
+            y,
+            text_width - SECONDARY_TEXT_X,
+            secondary.trim(),
+            secondary_color,
+        );
+    } else {
+        draw_text_segment(hdc, x, y, text_width, text, primary_color);
+    }
+}
+
+fn draw_text_segment(hdc: HDC, x: i32, y: i32, width: i32, text: &str, color: &Color) {
+    unsafe {
         let mut text_wide: Vec<u16> = text.encode_utf16().collect();
         let mut text_rect = RECT {
-            left: text_x,
+            left: x,
             top: y,
-            right: text_x + sc(text_width),
-            bottom: y + seg_h,
+            right: x + sc(width),
+            bottom: y + sc(ROW_HEIGHT),
         };
-        let _ = SetTextColor(hdc, COLORREF(text_color.to_colorref()));
+        let _ = SetTextColor(hdc, COLORREF(color.to_colorref()));
         let _ = DrawTextW(
             hdc,
             &mut text_wide,
@@ -4004,6 +4072,14 @@ mod tests {
             service_tooltip("Claude Code", "13%", "86%", false, true),
             "Claude Code: 7d 86%"
         );
+    }
+
+    #[test]
+    fn progress_fill_width_supports_continuous_visual_states() {
+        assert_eq!(progress_fill_width(100, None), 0);
+        assert_eq!(progress_fill_width(100, Some(10.0)), 10);
+        assert_eq!(progress_fill_width(100, Some(50.0)), 50);
+        assert_eq!(progress_fill_width(100, Some(100.0)), 100);
     }
 
     #[test]
