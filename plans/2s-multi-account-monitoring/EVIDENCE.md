@@ -191,6 +191,111 @@ NEXT AUTHORIZED ACTION
 Sol/Sidik must review this hard stop and approve a mechanism that provides auth-only ownership without creating a second Codex workspace. Do not start Phase 01, start slot-2, login, or implement production account management until that review resolves the boundary.
 ```
 
+### Phase 00 continuation — direct `codex-login` auth-only harness
+
+**Status:** `BLOCKED`
+
+**Implementation checkpoint under test:** `d313c786bdc7bec3cdbc01f5e97c172f10af6c44` (no production source or dependency change)
+
+#### CODEX AUTH SOURCE SHA
+
+- Official OpenAI Codex source: `openai/codex`
+- Pinned reviewed revision: `94cbbddafc1776d5e377bca1b05932c697e82238`
+- Reviewed crate: `codex-rs/login` (`codex-login`)
+- Harness was compiled as a temporary overlay member of the pinned `codex-rs` workspace so its existing workspace lock/resolution was used. The overlay was outside this repository and was not committed.
+- Build command: `cargo check -p codex-phase00-direct-harness`
+- Build result: `PASS` (`Finished dev profile`)
+
+The pinned source exposes `AuthCredentialsStoreMode::Keyring`, `AuthKeyringBackendKind::{Direct, Secrets}`, `run_login_server`, `AuthManager::{auth, refresh_token, logout_with_revoke}`, and `CodexAuth::{get_token, get_account_id}`. The harness selected `Keyring + Secrets` after the Windows Direct backend rejected the managed OAuth payload at the platform's 2560-character keyring attribute limit. No fallback to `Auto` or `File` was used.
+
+#### AUTH-ONLY BOUNDARY
+
+The only approved namespaces used by the direct harness were:
+
+- `%LOCALAPPDATA%\CodexUsage\auth-spike\slot-1`
+- `%LOCALAPPDATA%\CodexUsage\auth-spike\slot-2`
+
+Fresh construction/`AuthManager::auth()` inspection passed for both slots before login: `AUTH_PRESENT=false`, entry count `0` before and after, filesystem unchanged, and no `auth.json`, `history.jsonl`, `sessions`, SQLite runtime database, skills, plugin, or temp runtime entries.
+
+The first Direct-keyring login attempt was stopped at the storage error:
+`failed to write OAuth tokens to keyring: Attribute 'password encoded as UTF-16' is longer than a platform limit of 2560 chars`.
+Slot-1 remained empty. This is a backend limitation, not a reason to use `Auto`.
+
+With `Keyring + Secrets`, successful login created exactly one auth-owned encrypted file per authenticated slot: `secrets\codex_auth.age`. Slot-1 was `4209` bytes and slot-2 was `4325` bytes. No session/history/config/runtime state was created in either slot. After B cleanup, slot-2 retained only a `208`-byte empty encrypted container; its credential was removed and `AuthManager::auth()` returned no managed ChatGPT auth.
+
+#### ACCOUNT A
+
+- Browser login completed through `run_login_server`; no password, OAuth code, access token, refresh token, email, or credential content was captured in harness output/evidence.
+- `AuthManager::auth()` returned managed `Chatgpt` auth.
+- `CodexAuth::get_account_id()` produced opaque identity `ed81a109ecad9d86`.
+- `CodexAuth::get_token()` returned a bearer token in memory only; output explicitly recorded `TOKEN_CONTENT_LOGGED=false`.
+- Direct usage endpoint: `https://chatgpt.com/backend-api/wham/usage`, with bearer token and account header held in memory.
+- Usage observation: primary 5-hour window `used_percent=19`, `remaining=81`, `reset_at=1788140799`; secondary weekly window `used_percent=61`, `remaining=39`, `reset_at=1788643352`.
+
+#### ACCOUNT B
+
+- Browser login completed independently in slot-2.
+- `AuthManager::auth()` returned managed `Chatgpt` auth.
+- `CodexAuth::get_account_id()` produced opaque identity `09c2de991a2a229b`, distinct from A.
+- `CodexAuth::get_token()` returned a bearer token in memory only; output explicitly recorded `TOKEN_CONTENT_LOGGED=false`.
+- Direct usage observation: primary 5-hour window `used_percent=100`, `remaining=0`, `reset_at=1788128406`; secondary weekly window `used_percent=31`, `remaining=69`, `reset_at=1788655142`.
+
+The distinct opaque identities and different 5-hour/weekly values prove deterministic A/B attribution for this run. The two independent encrypted files and path-derived Codex keyring ownership are source/storage proof that the owners are separate. Raw refresh-token equality was intentionally never logged or persisted; direct raw-token comparison is therefore not claimed as evidence.
+
+#### RESTART
+
+New harness processes restored each account independently from its keyring owner:
+
+- A restart/read returned `Chatgpt`, opaque identity `ed81a109ecad9d86`, bearer available in memory.
+- B restart/read returned `Chatgpt`, opaque identity `09c2de991a2a229b`, bearer available in memory.
+- After B deletion, a new A restart/read still returned A and A usage remained readable.
+- After B deletion, a new B read returned `no managed ChatGPT auth`.
+
+#### REFRESH
+
+`AuthManager::refresh_token()` succeeded for A and B independently, preserving each opaque account identity. Reciprocal proof also passed:
+
+- A refresh: B identity remained `09c2de991a2a229b` and B encrypted auth file SHA remained `E2E60271F708C8CCA0177803200566CBF5BF626EE9ED020860BD6574C31728B6`.
+- B refresh: A identity remained `ed81a109ecad9d86` and A encrypted auth file SHA remained `4B89B718C98128AEBF38B3234110F7B05421D8FA612D7B1C30A26C394ADF5BCB`.
+
+The direct harness has no `Command`/subprocess path and does not invoke app-server, TUI, `codex exec`, thread/session APIs, or inference. The pinned Codex refresh implementation calls the ChatGPT token refresh authority and persists the result through the selected auth storage. This is a source-plus-runtime zero-inference proof for this harness path.
+
+#### DELETION ISOLATION
+
+`AuthManager::logout_with_revoke()` for B returned `ACCOUNT_OWNED_CREDENTIAL_REMOVED=true`. A subsequent B read returned unauthenticated. A's encrypted auth file remained byte/SHA stable, A restart/read and direct usage remained successful, and no normal Codex state was targeted. The remaining `208`-byte encrypted B container is an empty auth-storage container, not an authenticated B credential.
+
+#### WORKING CODEX MUTATION
+
+During the controlled A-refresh/B-refresh/deletion interval, normal Codex metadata remained stable:
+
+| Working state | Pre-cross-refresh | Final | Result |
+|---|---|---|---|
+| `~/.codex/auth.json` | 3980 bytes; SHA-256 `9017787DFDEACF53EC718F02D6A04F17E5635CAB89CC8F0954E888C010BB98ED` | identical | PASS for controlled interval |
+| `~/.codex/config.toml` | 8630 bytes; SHA-256 `6F77B6DFCAAC205FBEFA00F75A130EC4DAFB7173B66F5739811BAD37A89561C5` | identical | PASS for controlled interval |
+| `~/.codex/session_index.jsonl` | 35062 bytes; SHA-256 `BD7B7903DAE84DDBCC05D53630A738CA24D42C1491E1DDC26E31B8A74930A253` | identical | PASS for controlled interval |
+| `~/.codex/history.jsonl` | absent | absent | PASS |
+
+However, `auth.json` and `session_index.jsonl` had already diverged from the older baseline recorded in the prior evidence while the active Codex task was running. The direct harness passes explicit slot paths and does not set or use normal `~/.codex` as an auth owner, but the historical drift cannot be attributed exclusively by process/time in this run. SEC-01 is therefore not promoted to full PASS.
+
+#### Required IDs
+
+| ID | Disposition | Evidence |
+|---|---|---|
+| AUTH-01 | PASS bounded | A login, identity, direct usage, and auth-only slot boundary proven. |
+| AUTH-02 | PASS bounded | B login and distinct identity/direct usage proven; B owner separate from A. |
+| AUTH-03 | PASS bounded | A/B `AuthManager::refresh_token()` succeeded without inference. |
+| AUTH-04 | PASS bounded | A/B restored in new processes; cross-refresh left the other owner unchanged. |
+| AUTH-05 | PASS bounded | B logout-with-revoke removed B auth; A remained usable. |
+| AUTH-06 | PASS | Harness output/evidence contains no raw secret/token/email content. |
+| DATA-03 | PASS bounded | A/B opaque identities and quota values remained attributed to their slots. |
+| POLL-03 | PASS bounded | Direct harness has no inference/subprocess path; refresh uses Codex auth authority. |
+| SEC-01 | BLOCKED | Controlled interval stable, but historical working-state drift is not fully attributable under active Codex concurrency. |
+| SEC-02 | PASS bounded / raw equality not inspected | Separate Codex path-derived auth ownership and independent login/refresh proof; raw token comparison intentionally omitted. |
+
+**Decision:** `BLOCKED`. The direct `codex-login` hypothesis is technically viable with `Keyring + Secrets` and passes the auth-only/A-B/restart/refresh/deletion runtime checks, but Phase 00 acceptance is not closed because the working-Codex historical baseline is not fully attributable in the concurrent active Codex environment. Raw refresh-token equality was also not inspected; no claim beyond source/storage ownership proof is made.
+
+**Next authorized action:** Sol/Sidik review this direct-harness evidence. If a controlled quiet working-Codex baseline and stronger token-ownership proof are accepted, Sol may audit Phase 00. Phase 01 remains forbidden; no production dependency, account registry, polling, switching, or two-account UI work is authorized.
+
 ### Phase 01 — Account Registry
 
 **Status:** `blocked-by-phase-00`
