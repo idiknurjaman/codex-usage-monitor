@@ -46,7 +46,7 @@ Current single-account initial is computed at startup. Multi-account work must m
 
 **Status:** `BLOCKED`
 
-**Evidence checkpoint:** `ed2e8fb0dd9a556f087a0d2f7c6b384a50bd14db`
+**Prior evidence checkpoint:** `5dcd0a77dedd43468c751bf39650a75d1d72f75a`
 
 #### Harness and authority map
 
@@ -67,7 +67,7 @@ The sequential JSON-RPC smoke test sent only `initialize`, `initialized`, `accou
 
 #### Credential ownership and isolation
 
-**BLOCKED.** The default app-server session resolved to the user's working `~/.codex`, so using it for a second monitor account would share the active credential/workspace boundary. No separate credential-owned monitor auth root was created because no approved owner boundary or second-account login was available. No `auth.json` copy, refresh-token duplication, hidden account switch, or second user-facing `CODEX_HOME` was attempted.
+**BLOCKED at the prior checkpoint.** The default app-server session resolved to the user's working `~/.codex`, so using it for a second monitor account would share the active credential/workspace boundary. No separate credential-owned monitor auth root was created at that checkpoint because no approved owner boundary or second-account login was available. No `auth.json` copy, refresh-token duplication, hidden account switch, or second user-facing `CODEX_HOME` was attempted.
 
 #### Account A/B distinct rate-limit proof
 
@@ -109,6 +109,85 @@ The sessions aggregate changed while this active Codex task continued writing it
 **Decision:** `BLOCKED`. The app-server account/rate-limit read interface is a viable candidate for further investigation, but Phase 00 acceptance is not met. Do not begin Phase 01.
 
 **Next authorized action:** Sol/Sidik review this bounded result and, only if approved, define a credential-owned isolated test boundary and provide two distinct test accounts or an equivalent owner-approved runtime fixture. No production account registry, login lifecycle, multi-account polling, account switching, or two-account UI work is authorized.
+
+### Phase 00 continuation — strict keyring namespace attempt
+
+**Date:** `2026-08-30` UTC runtime attempt
+
+#### Authorized boundary and exact startup proof
+
+The approved boundary was treated as Codex-managed auth storage only, never as a user workspace:
+
+- `%LOCALAPPDATA%\CodexUsage\auth-spike\slot-1`
+- `%LOCALAPPDATA%\CodexUsage\auth-spike\slot-2`
+
+The installed runtime was `codex-cli 0.151.0-alpha.7.1`. Slot-1 was started with the exact strict-storage command:
+
+```powershell
+$env:CODEX_HOME = "%LOCALAPPDATA%\CodexUsage\auth-spike\slot-1"
+codex app-server --stdio --strict-config -c 'cli_auth_credentials_store="keyring"'
+```
+
+The process accepted the strict `keyring` configuration and completed `initialize`. Its reported `codexHome` ended in `CodexUsage\auth-spike\slot-1` (Windows packaged-runtime local-cache resolution). This proves parser/startup support for the requested keyring setting, not credential isolation.
+
+#### Hard-stop result
+
+Before any `account/login/start`, `account/read`, `account/rateLimits/read`, refresh, session, or inference request, the slot-1 namespace contained Codex runtime state beyond an auth-only boundary: 19 top-level entries including `goals_1.sqlite*`, `logs_2.sqlite*`, `memories_1.sqlite*`, `queue_1.sqlite*`, `state_5.sqlite*`, `installation_id`, `skills`, `.tmp`, and `tmp`. It did not contain `auth.json`, `history.jsonl`, or `sessions/`, but the additional Codex state/plugin/runtime workspace means the approved auth-only boundary was not preserved.
+
+This is a hard stop under the continuation authorization. Slot-2 was not started, no browser login was initiated, and no fallback to `auto` was attempted. The slot-1 process was stopped after the startup/namespace inspection.
+
+#### Account A proof
+
+**NOT PROVEN.** No login was initiated and no Account A identity, 5-hour quota, weekly quota, refresh ownership, or account deletion proof exists.
+
+#### Account B proof
+
+**NOT PROVEN.** Slot-2 was not started after the slot-1 hard stop. No Account B identity, 5-hour quota, weekly quota, or distinct-owner proof exists.
+
+#### Restart and refresh proof
+
+**NOT PROVEN.** No authenticated slot was available to restart. `account/read { refreshToken: true }` was not called. No inference request or `codex exec "."` was invoked during this attempt, but that is an execution observation, not proof that an isolated refresh path works.
+
+#### Working-Codex mutation proof
+
+The approved slot-1 startup was run with `CODEX_HOME` pointed at the slot boundary. The normal working namespace remained unchanged against the prior baseline:
+
+| Working state | Post-probe observation | Result |
+|---|---|---|
+| `~/.codex/auth.json` | 4111 bytes; SHA-256 `E6E52E27882C5C85192862EBA73B125CFE04C436DB5578C330BC4FF84581C4BF` | PASS against baseline |
+| `~/.codex/config.toml` | 8630 bytes; SHA-256 `6F77B6DFCAAC205FBEFA00F75A130EC4DAFB7173B66F5739811BAD37A89561C5` | PASS against baseline |
+| `~/.codex/session_index.jsonl` | 33989 bytes; SHA-256 `00FF3B78B93CDCE25E12FD0DB826E4AE5AC811647F042F3FCB1766159F26B1EA` | PASS against baseline |
+| `~/.codex/history.jsonl` | absent | PASS against baseline |
+| `~/.codex/sessions/` | active Codex session aggregate continued changing | INCONCLUSIVE; not attributed to slot-1, so SEC-01 remains blocked |
+
+No password, raw access token, refresh token, email, or credential content was recorded. No production source was changed.
+
+#### Required continuation handoff
+
+```text
+PHASE
+00-auth-spike
+HEAD
+5dcd0a77dedd43468c751bf39650a75d1d72f75a (implementation/evidence checkpoint before this evidence-only continuation commit)
+AUTH BOUNDARY
+BLOCKED — strict keyring startup was accepted, but slot-1 created general Codex runtime/plugin state inside the auth-only namespace; slot-2 was not started.
+ACCOUNT A PROOF
+NOT PROVEN — no login or account read was allowed after the hard stop.
+ACCOUNT B PROOF
+NOT PROVEN — slot-2 was not started.
+RESTART PROOF
+NOT PROVEN — no authenticated isolated slot existed.
+REFRESH PROOF
+NOT PROVEN — account/read with refreshToken=true was not called; no inference was invoked.
+WORKING-CODEX MUTATION PROOF
+PARTIAL — auth/config/session index/history stayed at baseline; sessions aggregate remains inconclusive because the active Codex task was writing concurrently.
+OPEN FINDINGS
+The installed app-server does not preserve the approved auth-only namespace under strict keyring startup. Credential ownership, two-account distinction, restart survival, refresh ownership, deletion isolation, and zero-inference refresh remain unproven.
+PASS-or-BLOCKED
+BLOCKED
+NEXT AUTHORIZED ACTION
+Sol/Sidik must review this hard stop and approve a mechanism that provides auth-only ownership without creating a second Codex workspace. Do not start Phase 01, start slot-2, login, or implement production account management until that review resolves the boundary.
+```
 
 ### Phase 01 — Account Registry
 
