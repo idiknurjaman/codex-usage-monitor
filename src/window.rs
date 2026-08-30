@@ -44,6 +44,14 @@ impl SendHwnd {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WidgetStyle {
+    #[default]
+    Bar,
+    Circle,
+}
+
 /// Shared application state
 struct AppState {
     hwnd: SendHwnd,
@@ -55,6 +63,8 @@ struct AppState {
     language_override: Option<LanguageId>,
     language: LanguageId,
     install_channel: InstallChannel,
+    widget_style: WidgetStyle,
+    account_initial: Option<char>,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -97,6 +107,24 @@ struct AppState {
     drag_start_offset: i32,
 
     widget_visible: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexIdentityAuthFile {
+    tokens: Option<CodexIdentityTokens>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexIdentityTokens {
+    id_token: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CodexIdentityClaims {
+    name: Option<String>,
+    username: Option<String>,
+    preferred_username: Option<String>,
+    email: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +172,8 @@ const IDM_ALERT_OFF: u16 = 80;
 const IDM_ALERT_10: u16 = 81;
 const IDM_ALERT_20: u16 = 82;
 const IDM_ALERT_30: u16 = 83;
+const IDM_STYLE_BAR: u16 = 90;
+const IDM_STYLE_CIRCLE: u16 = 91;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -346,6 +376,8 @@ struct SettingsFile {
     alert_threshold_percent: u8,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notified_quota_windows: Vec<String>,
+    #[serde(default)]
+    widget_style: WidgetStyle,
 }
 
 impl Default for SettingsFile {
@@ -364,6 +396,7 @@ impl Default for SettingsFile {
             show_weekly_window: true,
             alert_threshold_percent: 0,
             notified_quota_windows: Vec::new(),
+            widget_style: WidgetStyle::Bar,
         }
     }
 }
@@ -490,8 +523,80 @@ fn save_state_settings() {
             show_weekly_window: s.show_weekly_window,
             alert_threshold_percent: s.alert_threshold_percent,
             notified_quota_windows: s.notified_quota_windows.iter().cloned().collect(),
+            widget_style: s.widget_style,
         });
     }
+}
+
+fn codex_identity_auth_path() -> Option<PathBuf> {
+    if let Some(codex_home) = std::env::var_os("CODEX_HOME").map(PathBuf::from) {
+        return Some(codex_home.join("auth.json"));
+    }
+
+    Some(dirs::home_dir()?.join(".codex").join("auth.json"))
+}
+
+fn codex_account_initial() -> Option<char> {
+    let path = codex_identity_auth_path()?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let auth: CodexIdentityAuthFile = serde_json::from_str(&content).ok()?;
+    let id_token = auth.tokens?.id_token?;
+    let payload = id_token.split('.').nth(1)?;
+    let claims: CodexIdentityClaims = serde_json::from_slice(&decode_base64url(payload)?).ok()?;
+
+    account_initial_from_claims(&claims)
+}
+
+fn account_initial_from_claims(claims: &CodexIdentityClaims) -> Option<char> {
+    first_uppercase_initial(claims.name.as_deref())
+        .or_else(|| first_uppercase_initial(claims.username.as_deref()))
+        .or_else(|| first_uppercase_initial(claims.preferred_username.as_deref()))
+        .or_else(|| {
+            claims
+                .email
+                .as_deref()
+                .map(|email| email.split('@').next().unwrap_or(email))
+                .and_then(|local| first_uppercase_initial(Some(local)))
+        })
+}
+
+fn first_uppercase_initial(value: Option<&str>) -> Option<char> {
+    value?
+        .chars()
+        .find(|character| character.is_alphanumeric())
+        .and_then(|character| character.to_uppercase().next())
+}
+
+fn decode_base64url(input: &str) -> Option<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut accumulator = 0u32;
+    let mut bits = 0u8;
+
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            b'=' => break,
+            _ => return None,
+        } as u32;
+
+        accumulator = (accumulator << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push(((accumulator >> bits) & 0xFF) as u8);
+            if bits == 0 {
+                accumulator = 0;
+            } else {
+                accumulator &= (1u32 << bits) - 1;
+            }
+        }
+    }
+
+    Some(output)
 }
 
 fn format_precise_reset_time(resets_at: Option<SystemTime>) -> Option<String> {
@@ -1431,6 +1536,13 @@ const SECONDARY_TEXT_X: i32 = 36;
 const WIDGET_HEIGHT: i32 = 46;
 const WIDGET_CORNER_RADIUS: i32 = 12;
 const WIDGET_BACKGROUND_ALPHA: u8 = 77; // Approximately 30% opacity.
+const CIRCLE_DIAMETER: i32 = 12;
+const CIRCLE_STROKE: i32 = 2;
+const CIRCLE_LABEL_RIGHT_MARGIN: i32 = 4;
+const CIRCLE_INDICATOR_RIGHT_MARGIN: i32 = 4;
+const ACCOUNT_INITIAL_DIAMETER: i32 = 16;
+const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 18;
+const ACCOUNT_INITIAL_GAP: i32 = 4;
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
     let divider_h = sc(25);
@@ -1487,7 +1599,16 @@ fn usage_percent_for_display(
     }
 }
 
-fn total_widget_width_for(active_models: i32, language: LanguageId) -> i32 {
+fn total_widget_width_for(
+    active_models: i32,
+    language: LanguageId,
+    widget_style: WidgetStyle,
+    account_initial: Option<char>,
+) -> i32 {
+    if widget_style == WidgetStyle::Circle {
+        return total_circle_widget_width_for(active_models, language, account_initial);
+    }
+
     let bar_segments = row_bar_segment_count(active_models);
     let (label_width, text_width) = usage_layout_widths(language);
     let model_width = (sc(SEGMENT_W) + sc(SEGMENT_GAP)) * bar_segments - sc(SEGMENT_GAP)
@@ -1511,11 +1632,13 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
             state.show_antigravity,
         ),
         state.language,
+        state.widget_style,
+        state.account_initial,
     )
 }
 
 fn total_widget_width() -> i32 {
-    let (active_models, language) = {
+    let (active_models, language, widget_style, account_initial) = {
         let state = lock_state();
         state
             .as_ref()
@@ -1523,11 +1646,13 @@ fn total_widget_width() -> i32 {
                 (
                     active_model_count(s.show_claude_code, s.show_codex, s.show_antigravity),
                     s.language,
+                    s.widget_style,
+                    s.account_initial,
                 )
             })
-            .unwrap_or((1, LanguageId::English))
+            .unwrap_or((1, LanguageId::English, WidgetStyle::Bar, None))
     };
-    total_widget_width_for(active_models, language)
+    total_widget_width_for(active_models, language, widget_style, account_initial)
 }
 
 fn claude_accent_color() -> Color {
@@ -1560,6 +1685,27 @@ fn codex_usage_text_color(is_dark: bool) -> Color {
     } else {
         Color::from_hex("#1F1F1F")
     }
+}
+
+fn total_circle_widget_width_for(
+    active_models: i32,
+    language: LanguageId,
+    account_initial: Option<char>,
+) -> i32 {
+    let (label_width, text_width) = usage_layout_widths(language);
+    let provider_width = sc(CIRCLE_DIAMETER) + sc(CIRCLE_INDICATOR_RIGHT_MARGIN) + sc(text_width);
+    let identity_width = account_initial
+        .map(|_| sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP))
+        .unwrap_or(0);
+
+    sc(LEFT_DIVIDER_W)
+        + sc(DIVIDER_RIGHT_MARGIN)
+        + identity_width
+        + sc(label_width)
+        + sc(CIRCLE_LABEL_RIGHT_MARGIN)
+        + provider_width * active_models
+        + sc(MODEL_RIGHT_MARGIN) * (active_models - 1)
+        + sc(RIGHT_MARGIN)
 }
 
 fn usage_primary_text_color(is_dark: bool) -> Color {
@@ -1686,6 +1832,7 @@ pub fn run() {
 
         let claude_code_available = poller::claude_code_credentials_available();
         let settings = load_settings(claude_code_available);
+        let account_initial = codex_account_initial();
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
@@ -1704,7 +1851,12 @@ pub fn run() {
             WS_POPUP,
             0,
             0,
-            total_widget_width_for(initial_model_count, language),
+            total_widget_width_for(
+                initial_model_count,
+                language,
+                settings.widget_style,
+                account_initial,
+            ),
             sc(WIDGET_HEIGHT),
             HWND::default(),
             HMENU::default(),
@@ -1747,6 +1899,8 @@ pub fn run() {
                 language_override,
                 language,
                 install_channel,
+                widget_style: settings.widget_style,
+                account_initial,
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -1898,6 +2052,8 @@ fn render_layered() {
         show_antigravity,
         show_session_window,
         show_weekly_window,
+        widget_style,
+        account_initial,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -1924,6 +2080,8 @@ fn render_layered() {
                 s.show_antigravity,
                 s.show_session_window,
                 s.show_weekly_window,
+                s.widget_style,
+                s.account_initial,
             ),
             None => return,
         }
@@ -2019,6 +2177,8 @@ fn render_layered() {
             show_antigravity,
             show_session_window,
             show_weekly_window,
+            widget_style,
+            account_initial,
             &codex_accent,
             &antigravity_accent,
         );
@@ -2101,6 +2261,8 @@ fn paint_content(
     show_antigravity: bool,
     show_session_window: bool,
     show_weekly_window: bool,
+    widget_style: WidgetStyle,
+    account_initial: Option<char>,
     codex_accent: &Color,
     antigravity_accent: &Color,
 ) {
@@ -2181,61 +2343,132 @@ fn paint_content(
         );
         let old_font = SelectObject(hdc, font);
 
-        if show_session_window {
-            draw_row(
-                hdc,
-                content_x,
-                if show_weekly_window {
-                    row1_y
-                } else {
-                    single_row_y
-                },
-                is_dark,
-                strings.session_window,
-                session_pct,
-                session_text,
-                codex_session_pct,
-                codex_session_text,
-                antigravity_session_pct,
-                antigravity_session_text,
-                show_claude_code,
-                show_codex,
-                show_antigravity,
-                accent,
-                codex_accent,
-                antigravity_accent,
-                track,
-                label_width,
-                text_width,
-            );
-        }
-        if show_weekly_window {
-            draw_row(
-                hdc,
-                content_x,
-                if show_session_window {
-                    row2_y
-                } else {
-                    single_row_y
-                },
-                is_dark,
-                strings.weekly_window,
-                weekly_pct,
-                weekly_text,
-                codex_weekly_pct,
-                codex_weekly_text,
-                antigravity_weekly_pct,
-                antigravity_weekly_text,
-                show_claude_code,
-                show_codex,
-                show_antigravity,
-                accent,
-                codex_accent,
-                antigravity_accent,
-                track,
-                label_width,
-                text_width,
-            );
+        let circle_content_x = content_x
+            + account_initial
+                .map(|_| sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP))
+                .unwrap_or(0);
+
+        if widget_style == WidgetStyle::Circle {
+            if let Some(initial) = account_initial {
+                draw_account_initial(
+                    hdc,
+                    content_x,
+                    (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
+                    initial,
+                    is_dark,
+                );
+            }
+            if show_session_window {
+                draw_circle_row(
+                    hdc,
+                    circle_content_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    label_width,
+                    text_width,
+                    session_pct,
+                    session_text,
+                    codex_session_pct,
+                    codex_session_text,
+                    antigravity_session_pct,
+                    antigravity_session_text,
+                    show_claude_code,
+                    show_codex,
+                    show_antigravity,
+                    accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+            if show_weekly_window {
+                draw_circle_row(
+                    hdc,
+                    circle_content_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    label_width,
+                    text_width,
+                    weekly_pct,
+                    weekly_text,
+                    codex_weekly_pct,
+                    codex_weekly_text,
+                    antigravity_weekly_pct,
+                    antigravity_weekly_text,
+                    show_claude_code,
+                    show_codex,
+                    show_antigravity,
+                    accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+        } else {
+            if show_session_window {
+                draw_row(
+                    hdc,
+                    content_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    session_pct,
+                    session_text,
+                    codex_session_pct,
+                    codex_session_text,
+                    antigravity_session_pct,
+                    antigravity_session_text,
+                    show_claude_code,
+                    show_codex,
+                    show_antigravity,
+                    accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
+            if show_weekly_window {
+                draw_row(
+                    hdc,
+                    content_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    weekly_pct,
+                    weekly_text,
+                    codex_weekly_pct,
+                    codex_weekly_text,
+                    antigravity_weekly_pct,
+                    antigravity_weekly_text,
+                    show_claude_code,
+                    show_codex,
+                    show_antigravity,
+                    accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
         }
 
         SelectObject(hdc, old_font);
@@ -3141,6 +3374,22 @@ unsafe extern "system" fn wnd_proc(
                     // Reset the poll timer with the new interval
                     SetTimer(hwnd, TIMER_POLL, new_interval, None);
                 }
+                IDM_STYLE_BAR | IDM_STYLE_CIRCLE => {
+                    let style = if id == IDM_STYLE_CIRCLE {
+                        WidgetStyle::Circle
+                    } else {
+                        WidgetStyle::Bar
+                    };
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            s.widget_style = style;
+                        }
+                    }
+                    save_state_settings();
+                    position_at_taskbar();
+                    render_layered();
+                }
                 IDM_SHOW_SESSION_WINDOW | IDM_SHOW_WEEKLY_WINDOW => {
                     {
                         let mut state = lock_state();
@@ -3322,6 +3571,7 @@ fn show_context_menu(hwnd: HWND) {
             show_antigravity,
             show_session_window,
             show_weekly_window,
+            widget_style,
             alert_threshold_percent,
         ) = {
             let state = lock_state();
@@ -3340,6 +3590,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_antigravity,
                     s.show_session_window,
                     s.show_weekly_window,
+                    s.widget_style,
                     s.alert_threshold_percent,
                 ),
                 None => (
@@ -3356,6 +3607,7 @@ fn show_context_menu(hwnd: HWND) {
                     false,
                     true,
                     true,
+                    WidgetStyle::Bar,
                     0,
                 ),
             }
@@ -3641,6 +3893,32 @@ fn show_context_menu(hwnd: HWND) {
             PCWSTR::from_raw(language_label.as_ptr()),
         );
 
+        let style_menu = CreatePopupMenu().unwrap();
+        for (id, label, style) in [
+            (IDM_STYLE_BAR, "Bar", WidgetStyle::Bar),
+            (IDM_STYLE_CIRCLE, "Circle", WidgetStyle::Circle),
+        ] {
+            let label = native_interop::wide_str(label);
+            let flags = if widget_style == style {
+                MF_CHECKED
+            } else {
+                MENU_ITEM_FLAGS(0)
+            };
+            let _ = AppendMenuW(
+                style_menu,
+                flags,
+                id as usize,
+                PCWSTR::from_raw(label.as_ptr()),
+            );
+        }
+        let style_label = native_interop::wide_str("Widget Style");
+        let _ = AppendMenuW(
+            menu,
+            MF_POPUP,
+            style_menu.0 as usize,
+            PCWSTR::from_raw(style_label.as_ptr()),
+        );
+
         let _ = AppendMenuW(settings_menu, MF_SEPARATOR, 0, PCWSTR::null());
 
         let version_label =
@@ -3723,6 +4001,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
         show_antigravity,
         show_session_window,
         show_weekly_window,
+        widget_style,
+        account_initial,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -3747,6 +4027,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_antigravity,
                 s.show_session_window,
                 s.show_weekly_window,
+                s.widget_style,
+                s.account_initial,
             ),
             None => return,
         }
@@ -3811,6 +4093,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
             show_antigravity,
             show_session_window,
             show_weekly_window,
+            widget_style,
+            account_initial,
             &codex_accent,
             &antigravity_accent,
         );
@@ -3943,6 +4227,232 @@ fn model_usage_width(segment_count: i32, text_width: i32) -> i32 {
     (sc(SEGMENT_W) + sc(SEGMENT_GAP)) * segment_count - sc(SEGMENT_GAP)
         + sc(BAR_RIGHT_MARGIN)
         + sc(text_width)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_circle_row(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    is_dark: bool,
+    label: &str,
+    label_width: i32,
+    text_width: i32,
+    claude_percent: Option<f64>,
+    claude_text: &str,
+    codex_percent: Option<f64>,
+    codex_text: &str,
+    antigravity_percent: Option<f64>,
+    antigravity_text: &str,
+    show_claude_code: bool,
+    show_codex: bool,
+    show_antigravity: bool,
+    claude_accent: &Color,
+    codex_accent: &Color,
+    antigravity_accent: &Color,
+) {
+    let label_color = usage_secondary_text_color(is_dark);
+    let secondary_color = usage_secondary_text_color(is_dark);
+    let separator_color = usage_separator_text_color(is_dark);
+    let mut label_wide: Vec<u16> = label.encode_utf16().collect();
+    let row_height = sc(ROW_HEIGHT);
+    let mut label_rect = RECT {
+        left: x,
+        top: y,
+        right: x + sc(label_width),
+        bottom: y + row_height,
+    };
+
+    unsafe {
+        let _ = SetTextColor(hdc, COLORREF(label_color.to_colorref()));
+        let _ = DrawTextW(
+            hdc,
+            &mut label_wide,
+            &mut label_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+        );
+    }
+
+    let mut provider_x = x + sc(label_width) + sc(CIRCLE_LABEL_RIGHT_MARGIN);
+    if show_claude_code {
+        draw_circle_provider(
+            hdc,
+            provider_x,
+            y,
+            claude_percent,
+            claude_text,
+            claude_accent,
+            &secondary_color,
+            &separator_color,
+            text_width,
+        );
+        provider_x += circle_provider_width(text_width) + sc(MODEL_RIGHT_MARGIN);
+    }
+    if show_codex {
+        draw_circle_provider(
+            hdc,
+            provider_x,
+            y,
+            codex_percent,
+            codex_text,
+            codex_accent,
+            &secondary_color,
+            &separator_color,
+            text_width,
+        );
+        provider_x += circle_provider_width(text_width) + sc(MODEL_RIGHT_MARGIN);
+    }
+    if show_antigravity {
+        draw_circle_provider(
+            hdc,
+            provider_x,
+            y,
+            antigravity_percent,
+            antigravity_text,
+            antigravity_accent,
+            &secondary_color,
+            &separator_color,
+            text_width,
+        );
+    }
+}
+
+fn circle_provider_width(text_width: i32) -> i32 {
+    sc(CIRCLE_DIAMETER) + sc(CIRCLE_INDICATOR_RIGHT_MARGIN) + sc(text_width)
+}
+
+fn draw_circle_provider(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    percent: Option<f64>,
+    text: &str,
+    accent: &Color,
+    secondary_color: &Color,
+    separator_color: &Color,
+    text_width: i32,
+) {
+    let row_height = sc(ROW_HEIGHT);
+    let diameter = sc(CIRCLE_DIAMETER);
+    let circle_x = x;
+    let circle_y = y + (row_height - diameter) / 2;
+    draw_circle_indicator(hdc, circle_x, circle_y, percent, accent);
+
+    draw_usage_text(
+        hdc,
+        circle_x + diameter + sc(CIRCLE_INDICATOR_RIGHT_MARGIN),
+        y,
+        text,
+        accent,
+        secondary_color,
+        separator_color,
+        text_width,
+    );
+}
+
+fn draw_account_initial(hdc: HDC, x: i32, y: i32, initial: char, is_dark: bool) {
+    let diameter = sc(ACCOUNT_INITIAL_DIAMETER);
+    let outline = usage_separator_text_color(is_dark);
+    let pen = unsafe { CreatePen(PS_SOLID, sc(1), COLORREF(outline.to_colorref())) };
+
+    unsafe {
+        let old_pen = SelectObject(hdc, pen);
+        let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        let _ = Ellipse(hdc, x, y, x + diameter, y + diameter);
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        let _ = DeleteObject(pen);
+    }
+
+    let mut initial_wide: Vec<u16> = initial.to_string().encode_utf16().collect();
+    let mut text_rect = RECT {
+        left: x,
+        top: y,
+        right: x + diameter,
+        bottom: y + diameter,
+    };
+    let primary = usage_primary_text_color(is_dark);
+    unsafe {
+        let _ = SetTextColor(hdc, COLORREF(primary.to_colorref()));
+        let _ = DrawTextW(
+            hdc,
+            &mut initial_wide,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+    }
+}
+
+fn draw_circle_indicator(hdc: HDC, x: i32, y: i32, percent: Option<f64>, accent: &Color) {
+    let diameter = sc(CIRCLE_DIAMETER);
+    let stroke = sc(CIRCLE_STROKE);
+    let radius = ((diameter - stroke) / 2).max(1);
+    let center_x = x + diameter / 2;
+    let center_y = y + diameter / 2;
+    let track_color = Color::from_hex("#666666");
+    let null_brush = unsafe { GetStockObject(NULL_BRUSH) };
+
+    unsafe {
+        let track_pen = CreatePen(PS_SOLID, stroke, COLORREF(track_color.to_colorref()));
+        let old_pen = SelectObject(hdc, track_pen);
+        let old_brush = SelectObject(hdc, null_brush);
+        let _ = Ellipse(
+            hdc,
+            center_x - radius,
+            center_y - radius,
+            center_x + radius + 1,
+            center_y + radius + 1,
+        );
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        let _ = DeleteObject(track_pen);
+
+        let Some(percent) = percent else {
+            return;
+        };
+        let percent = percent.clamp(0.0, 100.0);
+        if percent <= 0.0 {
+            return;
+        }
+
+        let progress_pen = CreatePen(PS_SOLID, stroke, COLORREF(accent.to_colorref()));
+        let old_pen = SelectObject(hdc, progress_pen);
+        let old_brush = SelectObject(hdc, null_brush);
+        if percent >= 99.5 {
+            let _ = Ellipse(
+                hdc,
+                center_x - radius,
+                center_y - radius,
+                center_x + radius + 1,
+                center_y + radius + 1,
+            );
+        } else {
+            let start_angle = 90.0_f64.to_radians();
+            let end_angle = (90.0 - percent as f64 * 3.6).to_radians();
+            let start = (
+                center_x + (radius as f64 * start_angle.cos()).round() as i32,
+                center_y - (radius as f64 * start_angle.sin()).round() as i32,
+            );
+            let end = (
+                center_x + (radius as f64 * end_angle.cos()).round() as i32,
+                center_y - (radius as f64 * end_angle.sin()).round() as i32,
+            );
+            let _ = Arc(
+                hdc,
+                center_x - radius,
+                center_y - radius,
+                center_x + radius + 1,
+                center_y + radius + 1,
+                start.0,
+                start.1,
+                end.0,
+                end.1,
+            );
+        }
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        let _ = DeleteObject(progress_pen);
+    }
 }
 
 fn draw_usage_bar(
@@ -4118,6 +4628,46 @@ mod tests {
     #[test]
     fn dib_color_value_matches_bitmap_channel_order() {
         assert_eq!(dib_color_value(Color::from_hex("#010203")), 0x010203);
+    }
+
+    #[test]
+    fn account_initial_prefers_name_then_username_then_email_local_part() {
+        let named = CodexIdentityClaims {
+            name: Some("Sidik Nurzaman".into()),
+            username: Some("nurzaman".into()),
+            preferred_username: Some("sidik".into()),
+            email: Some("sidik@example.com".into()),
+        };
+        assert_eq!(account_initial_from_claims(&named), Some('S'));
+
+        let username = CodexIdentityClaims {
+            username: Some("nurzaman".into()),
+            ..CodexIdentityClaims::default()
+        };
+        assert_eq!(account_initial_from_claims(&username), Some('N'));
+
+        let email = CodexIdentityClaims {
+            email: Some("sidik@example.com".into()),
+            ..CodexIdentityClaims::default()
+        };
+        assert_eq!(account_initial_from_claims(&email), Some('S'));
+        assert_eq!(
+            account_initial_from_claims(&CodexIdentityClaims::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn widget_style_serializes_and_defaults_to_bar() {
+        assert_eq!(SettingsFile::default().widget_style, WidgetStyle::Bar);
+
+        let mut settings = SettingsFile::default();
+        settings.widget_style = WidgetStyle::Circle;
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"widget_style\":\"circle\""));
+
+        let decoded: SettingsFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.widget_style, WidgetStyle::Circle);
     }
 
     #[test]
