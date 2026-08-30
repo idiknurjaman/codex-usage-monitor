@@ -1429,7 +1429,7 @@ const PRIMARY_TEXT_WIDTH: i32 = 30;
 const SEPARATOR_TEXT_X: i32 = 31;
 const SECONDARY_TEXT_X: i32 = 38;
 const WIDGET_HEIGHT: i32 = 46;
-const WIDGET_CORNER_RADIUS: i32 = 8;
+const WIDGET_CORNER_RADIUS: i32 = 12;
 const WIDGET_BACKGROUND_ALPHA: u8 = 77; // Approximately 30% opacity.
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
@@ -1588,6 +1588,10 @@ fn usage_separator_text_color(is_dark: bool) -> Color {
 
 fn transparent_key_color() -> Color {
     Color::from_hex("#010203")
+}
+
+fn dib_color_value(color: Color) -> u32 {
+    color.b as u32 | (color.g as u32) << 8 | (color.r as u32) << 16
 }
 
 fn widget_background_color(is_dark: bool, supports_alpha: bool) -> Color {
@@ -2020,14 +2024,14 @@ fn render_layered() {
         );
 
         // Background pixels → alpha 0. Content pixels → fully opaque.
-        let bg_bgr = bg_color.to_colorref();
-        let widget_background_bgr = widget_background.to_colorref();
+        let bg_dib = dib_color_value(bg_color);
+        let widget_background_dib = dib_color_value(widget_background);
         let pixel_data = std::slice::from_raw_parts_mut(bits as *mut u32, pixel_count);
         for px in pixel_data.iter_mut() {
             let rgb = *px & 0x00FFFFFF;
-            if rgb == bg_bgr {
+            if rgb == bg_dib {
                 *px = 0;
-            } else if rgb == widget_background_bgr {
+            } else if rgb == widget_background_dib {
                 *px = ((WIDGET_BACKGROUND_ALPHA as u32) << 24) | rgb;
             } else {
                 *px = rgb | 0xFF000000;
@@ -4109,6 +4113,11 @@ mod tests {
         assert_eq!(progress_fill_width(100, Some(10.0)), 10);
         assert_eq!(progress_fill_width(100, Some(50.0)), 50);
         assert_eq!(progress_fill_width(100, Some(100.0)), 100);
+    }
+
+    #[test]
+    fn dib_color_value_matches_bitmap_channel_order() {
+        assert_eq!(dib_color_value(Color::from_hex("#010203")), 0x010203);
     }
 
     #[test]
