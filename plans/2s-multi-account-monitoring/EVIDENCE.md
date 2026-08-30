@@ -7,7 +7,7 @@
 - **Current phase:** `01-account-registry`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1` until Phase 00 creates a newer implementation commit
+- **Implementation checkpoint:** `a2dad6f654b0815d74d29e3af996847071b5716e`
 
 ## Baseline evidence
 
@@ -20,25 +20,25 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-Multi-account credential ownership, registry, login lifecycle, and polling are not yet implemented.
+The Phase 01 account registry model is implemented. Multi-account credential lifecycle, polling, and UI remain out of scope for this phase.
 
 ## Open findings / blockers
 
-### BLOCKER-00 — monitor credential isolation not yet proven
+### BLOCKER-00 — monitor credential isolation (resolved in Phase 00)
 
-Need runtime proof that two Codex accounts can be independently authenticated/read/refreshed for monitoring without replacing the user's working Codex credential or splitting the normal Codex sessions/history/config source of truth.
+Resolved by the direct pinned `codex-login` runtime proof recorded in the Phase 00 continuation below.
 
-### BLOCKER-01 — existing Codex auth refresh path can invoke inference
+### BLOCKER-01 — existing Codex auth refresh path can invoke inference (resolved for monitor path)
 
-Existing single-account fallback may invoke `codex exec "."` to force local Codex token refresh. Multi-account monitoring must not use this strategy. Phase 00 must prove a zero-inference alternative.
+The existing single-account fallback remains unchanged, but the accepted monitor path uses direct pinned `codex-login` refresh and does not use inference.
 
 ### FINDING-01 — identity parsing currently lives in UI layer
 
-Current initial derivation is in `window.rs`. Phase 01 must move identity/auth concerns into an account domain so rendering consumes account identity rather than parsing credential files.
+Resolved by the Phase 01 account-domain projection; `window.rs` now consumes registry state rather than parsing credential files.
 
 ### FINDING-02 — current initial is startup-scoped
 
-Current single-account initial is computed at startup. Multi-account work must make identity lifecycle explicit rather than relying on startup-only renderer state.
+Phase 01 introduces explicit registry hydration and runtime account identity state; later lifecycle phases still own reconnect/re-auth behavior.
 
 ## Phase evidence
 
@@ -193,7 +193,7 @@ Sol/Sidik must review this hard stop and approve a mechanism that provides auth-
 
 ### Phase 00 continuation — direct `codex-login` auth-only harness
 
-**Status:** `READY FOR SOL GATE AUDIT`
+**Status:** `complete/PASS`
 
 **Implementation checkpoint under test:** `d313c786bdc7bec3cdbc01f5e97c172f10af6c44` (no production source or dependency change)
 
@@ -294,9 +294,9 @@ The controlled A-refresh/B-refresh/deletion interval remains the authoritative m
 | SEC-01 | PASS | Owner-attributed normal Codex account-switch activity is separated from the controlled monitor interval; all four normal-state markers were stable during monitor refresh/deletion. |
 | SEC-02 | PASS | Pinned Codex storage path uses independent auth owners; A/B had distinct identities and encrypted auth files, and reciprocal refresh left the other owner unchanged. No raw token content was logged or persisted. |
 
-**Decision:** `READY FOR SOL GATE AUDIT`. The direct `codex-login` hypothesis is technically viable with `Keyring + Secrets` and passes the auth-only/A-B/restart/refresh/deletion runtime checks. SEC-01 is closed by owner attribution plus the controlled interval; SEC-02 is closed by the pinned Codex storage ownership and reciprocal refresh proof. This is a handoff to Sol, not authorization to begin Phase 01.
+**Decision:** `PASS` — Sol phase-gate verdict recorded below. The direct `codex-login` hypothesis is accepted with `Keyring + Secrets`; auth-only, A/B, restart, refresh, deletion, SEC-01, and SEC-02 evidence passed. This transition authorizes Phase 01 only.
 
-**Next authorized action:** Sol's Phase 00 gate verdict is recorded below. Phase 01 is now the active phase; login UI, polling fan-out, switching, and later phases remain out of scope.
+**Next authorized action:** Phase 00 is complete. Phase 01 is the active phase; login UI, polling fan-out, switching, and later phases remain out of scope.
 
 #### Sol Phase 00 gate verdict
 
@@ -308,9 +308,59 @@ The controlled A-refresh/B-refresh/deletion interval remains the authoritative m
 
 ### Phase 01 — Account Registry
 
-**Status:** `in-progress`
+**Status:** `READY FOR SOL REVIEW`
 
-Evidence pending.
+Implementation and acceptance evidence are recorded below at checkpoint `a2dad6f654b0815d74d29e3af996847071b5716e`.
+
+### Phase 01 — Account Registry evidence
+
+**Status:** `READY FOR SOL REVIEW`
+
+**Implementation checkpoint:** `a2dad6f654b0815d74d29e3af996847071b5716e`
+
+#### Scope and ownership
+
+- Added `src/account.rs` as the account-domain owner for stable identity projection, monitored-account metadata, registry ordering, capacity, duplicate validation, and runtime connection/usage fields.
+- `window.rs` no longer parses JWTs or opens Codex auth files. It consumes `AccountRegistry::primary_initial()` and persists only `AccountRegistryMetadata` through the existing settings path.
+- The existing `poller.rs` Codex credential adapter now projects `account_id`/ID-token claims into `AccountIdentity` in memory. No token is stored in the account model or sent to the renderer.
+- The accepted Phase 00 mechanism remains unchanged: direct pinned `codex-login`, `AuthCredentialsStoreMode::Keyring` with `AuthKeyringBackendKind::Secrets`, isolated credential-owned namespaces, zero inference, and no normal Codex workspace ownership. Phase 01 does not add the production `codex-login` dependency or implement login/lifecycle.
+
+#### Account model and persistence proof
+
+`AccountRegistry` represents zero, one, or two `MonitoredAccount` values. `try_add()` enforces `MAX_MONITORED_ACCOUNTS = 2` and rejects duplicate stable `id` values before considering the initial. Vector insertion order is the persisted deterministic order. Two different stable identities may use the same initial.
+
+Persisted `MonitoredAccountMetadata` contains only `id`, optional `initial`, `enabled`, and opaque `auth_handle`. Runtime `connection_state`, `usage`, `last_success_at`, and `last_error` are not serialized. The focused serialization test verifies that `access_token`, `refresh_token`, `id_token`, and `email` do not appear in registry metadata.
+
+When registry metadata is absent, `AccountRegistry::hydrate()` creates at most one legacy active-account entry from the adapter's in-memory identity projection, preserving existing single-account initial behavior. Invalid/over-capacity persisted metadata is normalized through the same max-two/duplicate validation path.
+
+#### Tests and build evidence
+
+- `cargo fmt --check`: PASS.
+- `cargo test`: PASS — 38 passed, 0 failed.
+- `cargo clippy --all-targets`: PASS exit. Eight pre-existing warnings remain in `poller.rs`/`window.rs`; no new account-domain warning remains.
+- `cargo build --release`: attempted; default `target\release\codex-usage.exe` was locked by running PID `13584` and was not terminated.
+- `CARGO_TARGET_DIR=%TEMP%\codex-usage-phase01-release-target cargo build --release`: PASS — optimized release build.
+- `git diff --check`: PASS.
+
+#### Phase 01 acceptance matrix
+
+| Requirement | Result | Evidence |
+|---|---|---|
+| Zero/one/two account representation | PASS | `AccountRegistry` model and hydrate tests. |
+| Maximum two accounts | PASS | `RegistryError::CapacityReached` test. |
+| Stable duplicate identity | PASS | Duplicate `id` rejected regardless of initial. |
+| Deterministic persisted ordering | PASS | Vec insertion order round-trips through metadata. |
+| Same-initial accounts | PASS | Two distinct IDs with initial `S` coexist. |
+| Identity ownership outside renderer | PASS | JWT/auth parsing removed from `window.rs`; projection is adapter/domain-owned. |
+| Non-secret settings metadata | PASS | Metadata-only serializer and no credential fields. |
+| Existing single-account behavior | PASS | Legacy hydrate fallback and existing window tests pass. |
+| Existing usage semantics | PASS | Existing poller semantics tests remain green; no quota/reset/alert changes. |
+
+#### Scope guard
+
+No login UI, multi-account login/re-auth lifecycle, polling fan-out, account switching, alert changes, quota/reset changes, or Phase 02 work was added.
+
+**Decision:** `READY FOR SOL REVIEW`. Phase 01 implementation acceptance evidence is complete at the checkpoint above. Sol review is the next gate; Phase 02 and later phases remain blocked.
 
 ### Phase 02 — Account Login & Lifecycle
 
