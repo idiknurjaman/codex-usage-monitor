@@ -124,8 +124,10 @@ The approved boundary was treated as Codex-managed auth storage only, never as a
 The installed runtime was `codex-cli 0.151.0-alpha.7.1`. Slot-1 was started with the exact strict-storage command:
 
 ```powershell
-$env:CODEX_HOME = "%LOCALAPPDATA%\CodexUsage\auth-spike\slot-1"
-codex app-server --stdio --strict-config -c 'cli_auth_credentials_store="keyring"'
+& {
+  $env:CODEX_HOME = Join-Path $env:LOCALAPPDATA 'CodexUsage\auth-spike\slot-1'
+  codex app-server --stdio --strict-config -c 'cli_auth_credentials_store="keyring"'
+}
 ```
 
 The process accepted the strict `keyring` configuration and completed `initialize`. Its reported `codexHome` ended in `CodexUsage\auth-spike\slot-1` (Windows packaged-runtime local-cache resolution). This proves parser/startup support for the requested keyring setting, not credential isolation.
