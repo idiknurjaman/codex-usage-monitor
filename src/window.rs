@@ -1408,10 +1408,10 @@ fn set_startup_enabled(enable: bool) {
 }
 
 // Dimensions matching the C# version
-const SEGMENT_W: i32 = 6;
+const SEGMENT_W: i32 = 7;
 const SEGMENT_H: i32 = 4;
 const SEGMENT_GAP: i32 = 0;
-const SEGMENT_COUNT: i32 = 6;
+const SEGMENT_COUNT: i32 = 8;
 
 const LEFT_DIVIDER_W: i32 = 3;
 const DIVIDER_RIGHT_MARGIN: i32 = 3;
