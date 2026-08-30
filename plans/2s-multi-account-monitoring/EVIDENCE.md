@@ -275,7 +275,9 @@ During the controlled A-refresh/B-refresh/deletion interval, normal Codex metada
 | `~/.codex/session_index.jsonl` | 35062 bytes; SHA-256 `BD7B7903DAE84DDBCC05D53630A738CA24D42C1491E1DDC26E31B8A74930A253` | identical | PASS for controlled interval |
 | `~/.codex/history.jsonl` | absent | absent | PASS |
 
-However, `auth.json` and `session_index.jsonl` had already diverged from the older baseline recorded in the prior evidence while the active Codex task was running. The direct harness passes explicit slot paths and does not set or use normal `~/.codex` as an auth owner, but the historical drift cannot be attributed exclusively by process/time in this run. SEC-01 is therefore not promoted to full PASS.
+Owner-supplied temporal evidence now correlates the `auth.json` drift with a normal Codex account switch: Sidik's chat is timestamped `03:46` local time (`20:46 UTC`), while the changed `~/.codex/auth.json` has `LastWriteTimeUtc=20:45:53.3892576Z`, approximately seven seconds earlier. This supports the account-switch explanation and is not evidence of direct-harness mutation. It remains owner-supplied timing evidence rather than an OS process trace.
+
+`session_index.jsonl` continued to be written by the active Codex task, so that aggregate remains concurrent and not attributable to the direct harness by path/process evidence. SEC-01 is therefore improved for `auth.json` but is not promoted to full PASS.
 
 #### Required IDs
 
