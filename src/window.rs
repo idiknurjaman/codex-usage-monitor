@@ -1429,6 +1429,8 @@ const PRIMARY_TEXT_WIDTH: i32 = 30;
 const SEPARATOR_TEXT_X: i32 = 31;
 const SECONDARY_TEXT_X: i32 = 38;
 const WIDGET_HEIGHT: i32 = 46;
+const WIDGET_CORNER_RADIUS: i32 = 8;
+const WIDGET_BACKGROUND_ALPHA: u8 = 77; // Approximately 30% opacity.
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
     let divider_h = sc(25);
@@ -1586,6 +1588,18 @@ fn usage_separator_text_color(is_dark: bool) -> Color {
 
 fn transparent_key_color() -> Color {
     Color::from_hex("#010203")
+}
+
+fn widget_background_color(is_dark: bool, supports_alpha: bool) -> Color {
+    if supports_alpha {
+        Color::from_hex("#000000")
+    } else if is_dark {
+        // Equivalent to black at roughly 30% over the usual dark taskbar.
+        Color::from_hex("#0E0E0E")
+    } else {
+        // Equivalent to black at roughly 30% over a light taskbar.
+        Color::from_hex("#AAAAAA")
+    }
 }
 
 fn antigravity_usage_text_color(is_dark: bool) -> Color {
@@ -1938,6 +1952,7 @@ fn render_layered() {
         Color::from_hex("#404040")
     };
     let bg_color = transparent_key_color();
+    let widget_background = widget_background_color(is_dark, true);
 
     unsafe {
         let screen_dc = GetDC(hwnd);
@@ -1977,6 +1992,7 @@ fn render_layered() {
             height,
             is_dark,
             &bg_color,
+            &widget_background,
             &text_color,
             &accent,
             &track,
@@ -2005,11 +2021,14 @@ fn render_layered() {
 
         // Background pixels → alpha 0. Content pixels → fully opaque.
         let bg_bgr = bg_color.to_colorref();
+        let widget_background_bgr = widget_background.to_colorref();
         let pixel_data = std::slice::from_raw_parts_mut(bits as *mut u32, pixel_count);
         for px in pixel_data.iter_mut() {
             let rgb = *px & 0x00FFFFFF;
             if rgb == bg_bgr {
                 *px = 0;
+            } else if rgb == widget_background_bgr {
+                *px = ((WIDGET_BACKGROUND_ALPHA as u32) << 24) | rgb;
             } else {
                 *px = rgb | 0xFF000000;
             }
@@ -2055,6 +2074,7 @@ fn paint_content(
     height: i32,
     is_dark: bool,
     bg: &Color,
+    widget_background: &Color,
     text_color: &Color,
     accent: &Color,
     track: &Color,
@@ -2101,6 +2121,13 @@ fn paint_content(
         let bg_brush = CreateSolidBrush(COLORREF(bg.to_colorref()));
         FillRect(hdc, &client_rect, bg_brush);
         let _ = DeleteObject(bg_brush);
+
+        draw_rounded_rect(
+            hdc,
+            &client_rect,
+            widget_background,
+            sc(WIDGET_CORNER_RADIUS),
+        );
 
         // Subtle drag hint. The full left strip remains the hit area.
         let divider_h = sc(18);
@@ -3735,6 +3762,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
         Color::from_hex("#404040")
     };
     let bg_color = transparent_key_color();
+    let widget_background = widget_background_color(is_dark, false);
 
     unsafe {
         let mut client_rect = RECT::default();
@@ -3756,6 +3784,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
             height,
             is_dark,
             &bg_color,
+            &widget_background,
             &text_color,
             &accent,
             &track,
