@@ -2,7 +2,8 @@ use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default)]
 pub struct UsageSection {
-    pub percentage: f64,
+    /// Canonical provider value. `None` means the quota window is unknown or unavailable.
+    pub used_percentage: Option<f64>,
     pub resets_at: Option<SystemTime>,
 }
 

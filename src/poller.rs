@@ -768,12 +768,12 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
     let mut data = UsageData::default();
 
     if let Some(bucket) = &response.five_hour {
-        data.session.percentage = bucket.utilization;
+        data.session.used_percentage = Some(bucket.utilization);
         data.session.resets_at = parse_iso8601(bucket.resets_at.as_deref());
     }
 
     if let Some(bucket) = &response.seven_day {
-        data.weekly.percentage = bucket.utilization;
+        data.weekly.used_percentage = Some(bucket.utilization);
         data.weekly.resets_at = parse_iso8601(bucket.resets_at.as_deref());
     }
 
@@ -830,15 +830,17 @@ fn fetch_usage_via_messages(token: &str) -> Result<UsageData, PollError> {
 fn parse_rate_limit_headers(response: &ureq::Response) -> UsageData {
     let mut data = UsageData::default();
 
-    data.session.percentage =
-        get_header_f64(response, "anthropic-ratelimit-unified-5h-utilization") * 100.0;
+    data.session.used_percentage =
+        get_header_f64(response, "anthropic-ratelimit-unified-5h-utilization")
+            .map(|value| value * 100.0);
     data.session.resets_at = unix_to_system_time(get_header_i64(
         response,
         "anthropic-ratelimit-unified-5h-reset",
     ));
 
-    data.weekly.percentage =
-        get_header_f64(response, "anthropic-ratelimit-unified-7d-utilization") * 100.0;
+    data.weekly.used_percentage =
+        get_header_f64(response, "anthropic-ratelimit-unified-7d-utilization")
+            .map(|value| value * 100.0);
     data.weekly.resets_at = unix_to_system_time(get_header_i64(
         response,
         "anthropic-ratelimit-unified-7d-reset",
@@ -846,13 +848,13 @@ fn parse_rate_limit_headers(response: &ureq::Response) -> UsageData {
 
     let overall_reset = get_header_i64(response, "anthropic-ratelimit-unified-reset");
 
-    if data.session.percentage == 0.0 && data.weekly.percentage == 0.0 {
+    if data.session.used_percentage == Some(0.0) && data.weekly.used_percentage == Some(0.0) {
         let status = response.header("anthropic-ratelimit-unified-status");
         if status == Some("rejected") {
             let claim = response.header("anthropic-ratelimit-unified-representative-claim");
             match claim {
-                Some("five_hour") => data.session.percentage = 100.0,
-                Some("seven_day") => data.weekly.percentage = 100.0,
+                Some("five_hour") => data.session.used_percentage = Some(100.0),
+                Some("seven_day") => data.weekly.used_percentage = Some(100.0),
                 _ => {}
             }
         }
@@ -953,7 +955,7 @@ fn codex_window_kind(window: &CodexRateLimitWindow) -> Option<UsageWindowKind> {
 
 fn codex_section_from_window(window: &CodexRateLimitWindow) -> UsageSection {
     UsageSection {
-        percentage: remaining_percentage(window.used_percent),
+        used_percentage: Some(window.used_percent),
         resets_at: unix_to_system_time(Some(window.reset_at)),
     }
 }
@@ -1133,7 +1135,7 @@ fn fetch_antigravity_quota_summary(
 fn antigravity_section_from_quota(quota: AntigravityQuotaInfo) -> Option<UsageSection> {
     let remaining = quota.remaining_fraction?.clamp(0.0, 1.0);
     Some(UsageSection {
-        percentage: (1.0 - remaining) * 100.0,
+        used_percentage: Some((1.0 - remaining) * 100.0),
         resets_at: parse_iso8601(quota.reset_time.as_deref()),
     })
 }
@@ -1143,7 +1145,7 @@ fn antigravity_section_from_summary_bucket(
 ) -> Option<UsageSection> {
     let remaining = bucket.remaining_fraction?.clamp(0.0, 1.0);
     Some(UsageSection {
-        percentage: (1.0 - remaining) * 100.0,
+        used_percentage: Some((1.0 - remaining) * 100.0),
         resets_at: parse_iso8601(bucket.reset_time.as_deref()),
     })
 }
@@ -1220,8 +1222,8 @@ where
     I: IntoIterator<Item = UsageSection>,
 {
     sections.into_iter().max_by(|a, b| {
-        a.percentage
-            .partial_cmp(&b.percentage)
+        a.used_percentage
+            .partial_cmp(&b.used_percentage)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.resets_at.cmp(&b.resets_at))
     })
@@ -1235,11 +1237,8 @@ fn is_antigravity_display_model(model: &str) -> bool {
         || model.starts_with("imagen")
 }
 
-fn get_header_f64(response: &ureq::Response, name: &str) -> f64 {
-    response
-        .header(name)
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0)
+fn get_header_f64(response: &ureq::Response, name: &str) -> Option<f64> {
+    response.header(name).and_then(|s| s.parse::<f64>().ok())
 }
 
 fn get_header_i64(response: &ureq::Response, name: &str) -> Option<i64> {
@@ -1620,7 +1619,7 @@ pub fn format_line(
 }
 
 /// Format a usage section whose adapter has already normalized the value to
-/// remaining percentage.
+/// remaining percentage at the presentation boundary.
 pub fn format_remaining_line(
     section: &UsageSection,
     strings: Strings,
@@ -1635,21 +1634,26 @@ fn format_line_with_semantics(
     strings: Strings,
     show_remaining_in_chinese: bool,
     window: UsageWindowKind,
-    percentage_is_remaining: bool,
+    display_remaining: bool,
 ) -> String {
+    let Some(used_percentage) = section.used_percentage else {
+        return "--".to_string();
+    };
+    let remaining = remaining_percentage(used_percentage);
+
     if show_remaining_in_chinese {
-        let remaining = if percentage_is_remaining {
-            section.percentage.clamp(0.0, 100.0)
-        } else {
-            remaining_percentage(section.percentage)
-        };
         let reset = section
             .resets_at
             .and_then(native_interop::system_time_to_local);
         return format_simplified_chinese_values(remaining, reset, window);
     }
 
-    let pct = format!("{:.0}%", section.percentage);
+    let percentage = if display_remaining {
+        remaining
+    } else {
+        used_percentage
+    };
+    let pct = format!("{percentage:.0}%");
     let cd = format_countdown(section.resets_at, strings);
     if cd.is_empty() {
         pct
@@ -1776,7 +1780,7 @@ mod tests {
     fn usage_with_session_percent(percentage: f64) -> UsageData {
         UsageData {
             session: UsageSection {
-                percentage,
+                used_percentage: Some(percentage),
                 resets_at: None,
             },
             weekly: UsageSection::default(),
@@ -1793,7 +1797,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_used_percent_is_normalized_to_remaining_and_preserves_reset_time() {
+    fn codex_used_percent_is_preserved_as_canonical_used_value_and_keeps_reset_time() {
         let response: CodexUsageResponse = serde_json::from_str(
             r#"{
                 "rate_limit": {
@@ -1814,8 +1818,8 @@ mod tests {
 
         let usage = codex_usage_from_response(response).expect("rate limit should be available");
 
-        assert_eq!(usage.session.percentage, 19.0);
-        assert_eq!(usage.weekly.percentage, 45.0);
+        assert_eq!(usage.session.used_percentage, Some(81.0));
+        assert_eq!(usage.weekly.used_percentage, Some(55.0));
         assert_eq!(
             usage.session.resets_at,
             unix_to_system_time(Some(1784500338))
@@ -1844,9 +1848,9 @@ mod tests {
 
         let usage = codex_usage_from_response(response).expect("rate limit should be available");
 
-        assert_eq!(usage.session.percentage, 0.0);
+        assert_eq!(usage.session.used_percentage, None);
         assert!(usage.session.resets_at.is_none());
-        assert_eq!(usage.weekly.percentage, 79.0);
+        assert_eq!(usage.weekly.used_percentage, Some(21.0));
         assert!(usage.weekly.resets_at.is_some());
     }
 
@@ -1870,8 +1874,8 @@ mod tests {
 
         let usage = codex_usage_from_response(response).expect("rate limit should be available");
 
-        assert_eq!(usage.session.percentage, 82.0);
-        assert_eq!(usage.weekly.percentage, 67.0);
+        assert_eq!(usage.session.used_percentage, Some(18.0));
+        assert_eq!(usage.weekly.used_percentage, Some(33.0));
     }
 
     #[test]
@@ -1894,7 +1898,7 @@ mod tests {
         assert_eq!(strings.session_window, "5h");
         assert_eq!(strings.weekly_window, "7d");
         let section = UsageSection {
-            percentage: 30.0,
+            used_percentage: Some(30.0),
             resets_at: None,
         };
         assert_eq!(
@@ -1902,7 +1906,7 @@ mod tests {
             "剩余70%"
         );
         let codex_section = UsageSection {
-            percentage: 19.0,
+            used_percentage: Some(81.0),
             resets_at: None,
         };
         assert_eq!(
@@ -1942,7 +1946,7 @@ mod tests {
         .expect("codex data should keep the poll successful");
 
         assert!(data.claude_code.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(data.codex.unwrap().session.used_percentage, Some(42.0));
     }
 
     #[test]
@@ -1957,7 +1961,10 @@ mod tests {
         )
         .expect("claude data should keep the poll successful");
 
-        assert_eq!(data.claude_code.unwrap().session.percentage, 64.0);
+        assert_eq!(
+            data.claude_code.unwrap().session.used_percentage,
+            Some(64.0)
+        );
         assert!(data.codex.is_none());
     }
 
@@ -1989,7 +1996,7 @@ mod tests {
         .expect("codex data should keep the poll successful");
 
         assert!(data.antigravity.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(data.codex.unwrap().session.used_percentage, Some(42.0));
     }
 
     #[test]
@@ -2042,8 +2049,8 @@ mod tests {
         let usage =
             antigravity_usage_from_summary(response).expect("Gemini quota should be selected");
 
-        assert!((usage.weekly.percentage - 0.695705).abs() < 0.000001);
-        assert!((usage.session.percentage - 4.17425).abs() < 0.000001);
+        assert!((usage.weekly.used_percentage.unwrap() - 0.695705).abs() < 0.000001);
+        assert!((usage.session.used_percentage.unwrap() - 4.17425).abs() < 0.000001);
         assert!(usage.weekly.resets_at.is_some());
         assert!(usage.session.resets_at.is_some());
     }
