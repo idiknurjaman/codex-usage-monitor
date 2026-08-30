@@ -1408,17 +1408,17 @@ fn set_startup_enabled(enable: bool) {
 }
 
 // Dimensions matching the C# version
-const SEGMENT_W: i32 = 10;
+const SEGMENT_W: i32 = 6;
 const SEGMENT_H: i32 = 4;
-const SEGMENT_GAP: i32 = 1;
-const SEGMENT_COUNT: i32 = 12;
+const SEGMENT_GAP: i32 = 0;
+const SEGMENT_COUNT: i32 = 6;
 
 const LEFT_DIVIDER_W: i32 = 3;
-const DIVIDER_RIGHT_MARGIN: i32 = 7;
-const LABEL_WIDTH: i32 = 18;
-const LABEL_RIGHT_MARGIN: i32 = 7;
-const BAR_RIGHT_MARGIN: i32 = 6;
-const TEXT_WIDTH: i32 = 62;
+const DIVIDER_RIGHT_MARGIN: i32 = 3;
+const LABEL_WIDTH: i32 = 16;
+const LABEL_RIGHT_MARGIN: i32 = 3;
+const BAR_RIGHT_MARGIN: i32 = 3;
+const TEXT_WIDTH: i32 = 54;
 const SIMPLIFIED_CHINESE_LABEL_WIDTH: i32 = 20;
 const SIMPLIFIED_CHINESE_TEXT_WIDTH: i32 = 126;
 const MODEL_RIGHT_MARGIN: i32 = 3;
@@ -1427,7 +1427,7 @@ const ROW_HEIGHT: i32 = 16;
 const ROW_GAP: i32 = 2;
 const PRIMARY_TEXT_WIDTH: i32 = 30;
 const SEPARATOR_TEXT_X: i32 = 31;
-const SECONDARY_TEXT_X: i32 = 38;
+const SECONDARY_TEXT_X: i32 = 36;
 const WIDGET_HEIGHT: i32 = 46;
 const WIDGET_CORNER_RADIUS: i32 = 12;
 const WIDGET_BACKGROUND_ALPHA: u8 = 77; // Approximately 30% opacity.
