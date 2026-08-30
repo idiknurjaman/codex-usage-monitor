@@ -1614,9 +1614,13 @@ fn total_widget_width_for(
     let model_width = (sc(SEGMENT_W) + sc(SEGMENT_GAP)) * bar_segments - sc(SEGMENT_GAP)
         + sc(BAR_RIGHT_MARGIN)
         + sc(text_width);
+    let identity_width = account_initial
+        .map(|_| sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP))
+        .unwrap_or(0);
 
     sc(LEFT_DIVIDER_W)
         + sc(DIVIDER_RIGHT_MARGIN)
+        + identity_width
         + sc(label_width)
         + sc(LABEL_RIGHT_MARGIN)
         + model_width * active_models
@@ -2313,7 +2317,11 @@ fn paint_content(
         FillRect(hdc, &divider_rect, divider_brush);
         let _ = DeleteObject(divider_brush);
 
-        let content_x = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
+        let content_origin_x = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
+        let rows_content_x = content_origin_x
+            + account_initial
+                .map(|_| sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP))
+                .unwrap_or(0);
         let row_height = sc(ROW_HEIGHT);
         let row_gap = sc(ROW_GAP);
         let rows_height = row_height * 2 + row_gap;
@@ -2343,25 +2351,21 @@ fn paint_content(
         );
         let old_font = SelectObject(hdc, font);
 
-        let circle_content_x = content_x
-            + account_initial
-                .map(|_| sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP))
-                .unwrap_or(0);
+        if let Some(initial) = account_initial {
+            draw_account_initial(
+                hdc,
+                content_origin_x,
+                (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
+                initial,
+                is_dark,
+            );
+        }
 
         if widget_style == WidgetStyle::Circle {
-            if let Some(initial) = account_initial {
-                draw_account_initial(
-                    hdc,
-                    content_x,
-                    (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
-                    initial,
-                    is_dark,
-                );
-            }
             if show_session_window {
                 draw_circle_row(
                     hdc,
-                    circle_content_x,
+                    rows_content_x,
                     if show_weekly_window {
                         row1_y
                     } else {
@@ -2388,7 +2392,7 @@ fn paint_content(
             if show_weekly_window {
                 draw_circle_row(
                     hdc,
-                    circle_content_x,
+                    rows_content_x,
                     if show_session_window {
                         row2_y
                     } else {
@@ -2416,7 +2420,7 @@ fn paint_content(
             if show_session_window {
                 draw_row(
                     hdc,
-                    content_x,
+                    rows_content_x,
                     if show_weekly_window {
                         row1_y
                     } else {
@@ -2444,7 +2448,7 @@ fn paint_content(
             if show_weekly_window {
                 draw_row(
                     hdc,
-                    content_x,
+                    rows_content_x,
                     if show_session_window {
                         row2_y
                     } else {
