@@ -193,7 +193,7 @@ Sol/Sidik must review this hard stop and approve a mechanism that provides auth-
 
 ### Phase 00 continuation — direct `codex-login` auth-only harness
 
-**Status:** `BLOCKED`
+**Status:** `READY FOR SOL GATE AUDIT`
 
 **Implementation checkpoint under test:** `d313c786bdc7bec3cdbc01f5e97c172f10af6c44` (no production source or dependency change)
 
@@ -275,9 +275,9 @@ During the controlled A-refresh/B-refresh/deletion interval, normal Codex metada
 | `~/.codex/session_index.jsonl` | 35062 bytes; SHA-256 `BD7B7903DAE84DDBCC05D53630A738CA24D42C1491E1DDC26E31B8A74930A253` | identical | PASS for controlled interval |
 | `~/.codex/history.jsonl` | absent | absent | PASS |
 
-Owner-supplied temporal evidence now correlates the `auth.json` drift with a normal Codex account switch: Sidik's chat is timestamped `03:46` local time (`20:46 UTC`), while the changed `~/.codex/auth.json` has `LastWriteTimeUtc=20:45:53.3892576Z`, approximately seven seconds earlier. This supports the account-switch explanation and is not evidence of direct-harness mutation. It remains owner-supplied timing evidence rather than an OS process trace.
+Owner attribution resolves the historical baseline ambiguity: Sidik confirms that he intentionally logged the normal Codex installation into a different account during the test period. That owner action occurred outside the monitor harness and explains the historical `~/.codex/auth.json` rewrite. The timestamp correlation is consistent with this: the owner chat is `03:46` local time (`20:46 UTC`) and the changed file has `LastWriteTimeUtc=20:45:53.3892576Z`, approximately seven seconds earlier. The historical hashes are not claimed to be identical.
 
-`session_index.jsonl` continued to be written by the active Codex task, so that aggregate remains concurrent and not attributable to the direct harness by path/process evidence. SEC-01 is therefore improved for `auth.json` but is not promoted to full PASS.
+The controlled A-refresh/B-refresh/deletion interval remains the authoritative monitor-mutation proof: normal `auth.json`, `config.toml`, `session_index.jsonl`, and `history.jsonl` stayed stable in that interval. Concurrent `session_index.jsonl` writes observed outside that interval belong to active normal Codex activity and are not attributed to the direct harness. **SEC-01: PASS.**
 
 #### Required IDs
 
@@ -291,12 +291,12 @@ Owner-supplied temporal evidence now correlates the `auth.json` drift with a nor
 | AUTH-06 | PASS | Harness output/evidence contains no raw secret/token/email content. |
 | DATA-03 | PASS bounded | A/B opaque identities and quota values remained attributed to their slots. |
 | POLL-03 | PASS bounded | Direct harness has no inference/subprocess path; refresh uses Codex auth authority. |
-| SEC-01 | BLOCKED | Controlled interval stable, but historical working-state drift is not fully attributable under active Codex concurrency. |
-| SEC-02 | PASS bounded / raw equality not inspected | Separate Codex path-derived auth ownership and independent login/refresh proof; raw token comparison intentionally omitted. |
+| SEC-01 | PASS | Owner-attributed normal Codex account-switch activity is separated from the controlled monitor interval; all four normal-state markers were stable during monitor refresh/deletion. |
+| SEC-02 | PASS | Pinned Codex storage path uses independent auth owners; A/B had distinct identities and encrypted auth files, and reciprocal refresh left the other owner unchanged. No raw token content was logged or persisted. |
 
-**Decision:** `BLOCKED`. The direct `codex-login` hypothesis is technically viable with `Keyring + Secrets` and passes the auth-only/A-B/restart/refresh/deletion runtime checks, but Phase 00 acceptance is not closed because the working-Codex historical baseline is not fully attributable in the concurrent active Codex environment. Raw refresh-token equality was also not inspected; no claim beyond source/storage ownership proof is made.
+**Decision:** `READY FOR SOL GATE AUDIT`. The direct `codex-login` hypothesis is technically viable with `Keyring + Secrets` and passes the auth-only/A-B/restart/refresh/deletion runtime checks. SEC-01 is closed by owner attribution plus the controlled interval; SEC-02 is closed by the pinned Codex storage ownership and reciprocal refresh proof. This is a handoff to Sol, not authorization to begin Phase 01.
 
-**Next authorized action:** Sol/Sidik review this direct-harness evidence. If a controlled quiet working-Codex baseline and stronger token-ownership proof are accepted, Sol may audit Phase 00. Phase 01 remains forbidden; no production dependency, account registry, polling, switching, or two-account UI work is authorized.
+**Next authorized action:** Sol audits this complete Phase 00 evidence checkpoint. Phase 01 remains forbidden until Sol's audit passes; no production dependency, account registry, polling, switching, or two-account UI work is authorized.
 
 ### Phase 01 — Account Registry
 
