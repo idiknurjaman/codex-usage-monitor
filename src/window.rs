@@ -66,6 +66,7 @@ struct AppState {
     install_channel: InstallChannel,
     widget_style: WidgetStyle,
     account_registry: account::AccountRegistry,
+    legacy_account_initial: Option<char>,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -496,10 +497,18 @@ fn save_settings(settings: &SettingsFile) {
     }
 }
 
+fn settings_with_registry(
+    mut settings: SettingsFile,
+    registry: &account::AccountRegistry,
+) -> SettingsFile {
+    settings.account_registry = registry.metadata();
+    settings
+}
+
 fn save_state_settings() {
     let state = lock_state();
     if let Some(s) = state.as_ref() {
-        save_settings(&SettingsFile {
+        let settings = SettingsFile {
             tray_offset: s.tray_offset,
             taskbar_index: s.taskbar_index,
             poll_interval_ms: s.poll_interval_ms,
@@ -516,8 +525,9 @@ fn save_state_settings() {
             alert_threshold_percent: s.alert_threshold_percent,
             notified_quota_windows: s.notified_quota_windows.iter().cloned().collect(),
             widget_style: s.widget_style,
-            account_registry: s.account_registry.metadata(),
-        });
+            account_registry: account::AccountRegistryMetadata::default(),
+        };
+        save_settings(&settings_with_registry(settings, &s.account_registry));
     }
 }
 
@@ -1559,7 +1569,9 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
         ),
         state.language,
         state.widget_style,
-        state.account_registry.primary_initial(),
+        state
+            .account_registry
+            .display_initial(state.legacy_account_initial),
     )
 }
 
@@ -1573,7 +1585,7 @@ fn total_widget_width() -> i32 {
                     active_model_count(s.show_claude_code, s.show_codex, s.show_antigravity),
                     s.language,
                     s.widget_style,
-                    s.account_registry.primary_initial(),
+                    s.account_registry.display_initial(s.legacy_account_initial),
                 )
             })
             .unwrap_or((1, LanguageId::English, WidgetStyle::Bar, None))
@@ -1758,11 +1770,15 @@ pub fn run() {
 
         let claude_code_available = poller::claude_code_credentials_available();
         let settings = load_settings(claude_code_available);
-        let account_registry = account::AccountRegistry::hydrate(
-            settings.account_registry.clone(),
-            poller::codex_account_identity(),
-        );
-        let account_initial = account_registry.primary_initial();
+        let account_registry =
+            account::AccountRegistry::from_metadata(settings.account_registry.clone())
+                .unwrap_or_default();
+        let legacy_account_initial = if account_registry.is_empty() {
+            poller::codex_account_identity().and_then(|identity| identity.initial())
+        } else {
+            None
+        };
+        let account_initial = account_registry.display_initial(legacy_account_initial);
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
@@ -1831,6 +1847,7 @@ pub fn run() {
                 install_channel,
                 widget_style: settings.widget_style,
                 account_registry,
+                legacy_account_initial,
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -2011,7 +2028,7 @@ fn render_layered() {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_registry.primary_initial(),
+                s.account_registry.display_initial(s.legacy_account_initial),
             ),
             None => return,
         }
@@ -3958,7 +3975,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_registry.primary_initial(),
+                s.account_registry.display_initial(s.legacy_account_initial),
             ),
             None => return,
         }
@@ -4577,6 +4594,41 @@ mod tests {
 
         let decoded: SettingsFile = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.widget_style, WidgetStyle::Circle);
+    }
+
+    #[test]
+    fn empty_registry_legacy_display_survives_settings_save_without_persistence() {
+        let working_account_a = account::AccountIdentity {
+            id: "working-a".to_string(),
+            display_name: Some("Alice".to_string()),
+            username: None,
+            email: None,
+        };
+        let working_account_b = account::AccountIdentity {
+            id: "working-b".to_string(),
+            display_name: Some("Bob".to_string()),
+            username: None,
+            email: None,
+        };
+        let registry = account::AccountRegistry::empty();
+
+        assert_eq!(
+            registry.display_initial(working_account_a.initial()),
+            Some('A')
+        );
+
+        let saved = settings_with_registry(SettingsFile::default(), &registry);
+        assert!(saved.account_registry.is_empty());
+        let serialized = serde_json::to_string(&saved).unwrap();
+        let next_settings: SettingsFile = serde_json::from_str(&serialized).unwrap();
+        let next_registry =
+            account::AccountRegistry::from_metadata(next_settings.account_registry).unwrap();
+
+        assert!(next_registry.is_empty());
+        assert_eq!(
+            next_registry.display_initial(working_account_b.initial()),
+            Some('B')
+        );
     }
 
     #[test]

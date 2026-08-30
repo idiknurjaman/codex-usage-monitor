@@ -7,6 +7,27 @@ use crate::models::UsageData;
 
 pub const MAX_MONITORED_ACCOUNTS: usize = 2;
 
+/// Typed reference to one approved monitor-owned credential namespace.
+/// The filesystem root is resolved by the auth owner at runtime and is never
+/// serialized into settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MonitorAuthHandle {
+    #[serde(rename = "slot-1")]
+    Slot1,
+    #[serde(rename = "slot-2")]
+    Slot2,
+}
+
+#[allow(dead_code)] // Namespace resolution is consumed by the auth lifecycle phase.
+impl MonitorAuthHandle {
+    pub const fn namespace_key(self) -> &'static str {
+        match self {
+            Self::Slot1 => "auth-spike/slot-1",
+            Self::Slot2 => "auth-spike/slot-2",
+        }
+    }
+}
+
 /// Non-secret metadata persisted for one monitored account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitoredAccountMetadata {
@@ -15,8 +36,8 @@ pub struct MonitoredAccountMetadata {
     pub initial: Option<char>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Opaque reference to a Codex-owned credential owner. Never a token.
-    pub auth_handle: String,
+    /// Typed reference to a Codex-owned credential owner. Never a token/path.
+    pub auth_handle: MonitorAuthHandle,
 }
 
 fn default_enabled() -> bool {
@@ -52,13 +73,14 @@ pub struct MonitoredAccount {
     pub id: String,
     pub initial: Option<char>,
     pub enabled: bool,
-    pub auth_handle: String,
+    pub auth_handle: MonitorAuthHandle,
     pub connection_state: ConnectionState,
     pub usage: Option<UsageData>,
     pub last_success_at: Option<SystemTime>,
     pub last_error: Option<String>,
 }
 
+#[allow(dead_code)] // Identity-to-owner binding is consumed by account lifecycle wiring.
 impl MonitoredAccount {
     pub fn from_metadata(metadata: MonitoredAccountMetadata) -> Self {
         Self {
@@ -73,12 +95,12 @@ impl MonitoredAccount {
         }
     }
 
-    pub fn from_identity(identity: &AccountIdentity) -> Self {
+    pub fn from_identity(identity: &AccountIdentity, auth_handle: MonitorAuthHandle) -> Self {
         Self {
             id: identity.id.clone(),
             initial: identity.initial(),
             enabled: true,
-            auth_handle: identity.auth_handle(),
+            auth_handle,
             connection_state: ConnectionState::Connected,
             usage: None,
             last_success_at: None,
@@ -91,7 +113,7 @@ impl MonitoredAccount {
             id: self.id.clone(),
             initial: self.initial,
             enabled: self.enabled,
-            auth_handle: self.auth_handle.clone(),
+            auth_handle: self.auth_handle,
         }
     }
 }
@@ -99,7 +121,6 @@ impl MonitoredAccount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RegistryError {
     EmptyIdentity,
-    EmptyAuthHandle,
     CapacityReached,
     DuplicateIdentity,
 }
@@ -108,7 +129,6 @@ impl fmt::Display for RegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::EmptyIdentity => "account identity must not be empty",
-            Self::EmptyAuthHandle => "account auth handle must not be empty",
             Self::CapacityReached => "maximum monitored account count is two",
             Self::DuplicateIdentity => "account identity is already registered",
         })
@@ -138,19 +158,8 @@ impl AccountRegistry {
         Ok(registry)
     }
 
-    /// Retain the legacy single-account display when no registry metadata is
-    /// present, while keeping credential parsing outside the renderer.
-    pub fn hydrate(
-        metadata: AccountRegistryMetadata,
-        active_identity: Option<AccountIdentity>,
-    ) -> Self {
-        let mut registry = Self::from_metadata(metadata).unwrap_or_default();
-        if registry.accounts.is_empty() {
-            if let Some(identity) = active_identity {
-                let _ = registry.try_add(MonitoredAccount::from_identity(&identity));
-            }
-        }
-        registry
+    pub fn display_initial(&self, legacy_initial: Option<char>) -> Option<char> {
+        self.primary_initial().or(legacy_initial)
     }
 
     pub fn accounts(&self) -> &[MonitoredAccount] {
@@ -187,9 +196,6 @@ impl AccountRegistry {
         if account.id.trim().is_empty() {
             return Err(RegistryError::EmptyIdentity);
         }
-        if account.auth_handle.trim().is_empty() {
-            return Err(RegistryError::EmptyAuthHandle);
-        }
         if self.accounts.len() >= MAX_MONITORED_ACCOUNTS {
             return Err(RegistryError::CapacityReached);
         }
@@ -210,7 +216,8 @@ impl AccountRegistry {
     }
 }
 
-/// Runtime identity projection. Only id/initial/auth_handle can be persisted.
+/// Runtime identity projection. Persistence requires an explicit auth handle;
+/// identity itself never manufactures credential ownership.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountIdentity {
     pub id: String,
@@ -229,10 +236,6 @@ impl AccountIdentity {
                     .map(|email| email.split('@').next().unwrap_or(email))
                     .and_then(|local| first_uppercase_initial(Some(local)))
             })
-    }
-
-    pub fn auth_handle(&self) -> String {
-        format!("codex-keyring:{}", self.id)
     }
 }
 
@@ -330,6 +333,14 @@ mod tests {
         }
     }
 
+    fn monitored(
+        id: &str,
+        display_name: Option<&str>,
+        auth_handle: MonitorAuthHandle,
+    ) -> MonitoredAccount {
+        MonitoredAccount::from_identity(&identity(id, display_name), auth_handle)
+    }
+
     #[test]
     fn identity_prefers_display_name_then_username_then_email_local_part() {
         let named = AccountIdentity {
@@ -358,30 +369,34 @@ mod tests {
     fn registry_enforces_two_accounts_and_duplicate_identity() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(MonitoredAccount::from_identity(&identity(
+            .try_add(monitored(
                 "account-a",
                 Some("Sam"),
-            )))
+                MonitorAuthHandle::Slot1,
+            ))
             .unwrap();
         assert_eq!(
-            registry.try_add(MonitoredAccount::from_identity(&identity(
+            registry.try_add(monitored(
                 "account-a",
-                Some("Alex")
-            ))),
+                Some("Alex"),
+                MonitorAuthHandle::Slot2
+            )),
             Err(RegistryError::DuplicateIdentity)
         );
 
         registry
-            .try_add(MonitoredAccount::from_identity(&identity(
+            .try_add(monitored(
                 "account-b",
                 Some("Nina"),
-            )))
+                MonitorAuthHandle::Slot2,
+            ))
             .unwrap();
         assert_eq!(
-            registry.try_add(MonitoredAccount::from_identity(&identity(
+            registry.try_add(monitored(
                 "account-c",
-                Some("Ray")
-            ))),
+                Some("Ray"),
+                MonitorAuthHandle::Slot1
+            )),
             Err(RegistryError::CapacityReached)
         );
         assert_eq!(registry.len(), 2);
@@ -394,16 +409,18 @@ mod tests {
     fn same_initial_accounts_are_valid_and_order_is_persisted() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(MonitoredAccount::from_identity(&identity(
+            .try_add(monitored(
                 "account-a",
                 Some("Sam"),
-            )))
+                MonitorAuthHandle::Slot1,
+            ))
             .unwrap();
         registry
-            .try_add(MonitoredAccount::from_identity(&identity(
+            .try_add(monitored(
                 "account-b",
                 Some("Sidik"),
-            )))
+                MonitorAuthHandle::Slot2,
+            ))
             .unwrap();
 
         assert_eq!(registry.accounts()[0].initial, Some('S'));
@@ -417,10 +434,11 @@ mod tests {
     fn persisted_metadata_contains_no_credential_material() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(MonitoredAccount::from_identity(&identity(
+            .try_add(monitored(
                 "account-a",
                 Some("Sam"),
-            )))
+                MonitorAuthHandle::Slot1,
+            ))
             .unwrap();
         let serialized = serde_json::to_string(&registry.metadata()).unwrap();
         assert!(!serialized.contains("access_token"));
@@ -430,18 +448,45 @@ mod tests {
     }
 
     #[test]
-    fn projection_uses_stable_account_id_for_auth_handle() {
-        let projected = from_codex_auth_projection(Some("stable-account-id".into()), None)
-            .expect("account id should produce an identity");
-        assert_eq!(projected.id, "stable-account-id");
-        assert_eq!(projected.auth_handle(), "codex-keyring:stable-account-id");
+    fn typed_auth_handle_round_trips_without_an_absolute_path() {
+        let metadata = MonitoredAccountMetadata {
+            id: "account-a".to_string(),
+            initial: Some('S'),
+            enabled: true,
+            auth_handle: MonitorAuthHandle::Slot1,
+        };
+        let serialized = serde_json::to_string(&metadata).unwrap();
+        assert!(serialized.contains("\"auth_handle\":\"slot-1\""));
+        assert!(!serialized.contains("\\\\"));
+        assert_eq!(
+            serde_json::from_str::<MonitoredAccountMetadata>(&serialized).unwrap(),
+            metadata
+        );
+        assert_eq!(
+            MonitorAuthHandle::Slot1.namespace_key(),
+            "auth-spike/slot-1"
+        );
+        assert_eq!(
+            MonitorAuthHandle::Slot2.namespace_key(),
+            "auth-spike/slot-2"
+        );
     }
 
     #[test]
-    fn hydrate_preserves_legacy_single_account_behavior() {
+    fn projection_keeps_identity_independent_from_auth_handle() {
+        let projected = from_codex_auth_projection(Some("stable-account-id".into()), None)
+            .expect("account id should produce an identity");
+        assert_eq!(projected.id, "stable-account-id");
+        let account = MonitoredAccount::from_identity(&projected, MonitorAuthHandle::Slot2);
+        assert_eq!(account.id, "stable-account-id");
+        assert_eq!(account.auth_handle, MonitorAuthHandle::Slot2);
+    }
+
+    #[test]
+    fn empty_registry_uses_ephemeral_legacy_display_fallback() {
         let active = identity("account-a", Some("Sam"));
-        let registry = AccountRegistry::hydrate(AccountRegistryMetadata::default(), Some(active));
-        assert_eq!(registry.len(), 1);
-        assert_eq!(registry.primary_initial(), Some('S'));
+        let registry = AccountRegistry::empty();
+        assert_eq!(registry.len(), 0);
+        assert_eq!(registry.display_initial(active.initial()), Some('S'));
     }
 }
