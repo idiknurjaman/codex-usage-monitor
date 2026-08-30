@@ -4428,7 +4428,7 @@ fn draw_circle_indicator(hdc: HDC, x: i32, y: i32, percent: Option<f64>, accent:
             );
         } else {
             let start_angle = 90.0_f64.to_radians();
-            let end_angle = (90.0 - percent as f64 * 3.6).to_radians();
+            let end_angle = (90.0 - circle_sweep_degrees(percent) as f64).to_radians();
             let start = (
                 center_x + (radius as f64 * start_angle.cos()).round() as i32,
                 center_y - (radius as f64 * start_angle.sin()).round() as i32,
@@ -4437,6 +4437,7 @@ fn draw_circle_indicator(hdc: HDC, x: i32, y: i32, percent: Option<f64>, accent:
                 center_x + (radius as f64 * end_angle.cos()).round() as i32,
                 center_y - (radius as f64 * end_angle.sin()).round() as i32,
             );
+            let previous_direction = SetArcDirection(hdc, AD_CLOCKWISE);
             let _ = Arc(
                 hdc,
                 center_x - radius,
@@ -4448,11 +4449,16 @@ fn draw_circle_indicator(hdc: HDC, x: i32, y: i32, percent: Option<f64>, accent:
                 end.0,
                 end.1,
             );
+            let _ = SetArcDirection(hdc, ARC_DIRECTION(previous_direction));
         }
         SelectObject(hdc, old_brush);
         SelectObject(hdc, old_pen);
         let _ = DeleteObject(progress_pen);
     }
+}
+
+fn circle_sweep_degrees(remaining_percentage: f64) -> f64 {
+    remaining_percentage.clamp(0.0, 100.0) * 3.6
 }
 
 fn draw_usage_bar(
@@ -4668,6 +4674,13 @@ mod tests {
 
         let decoded: SettingsFile = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.widget_style, WidgetStyle::Circle);
+    }
+
+    #[test]
+    fn circle_remaining_sweep_is_monotonic() {
+        assert!(circle_sweep_degrees(76.0) > circle_sweep_degrees(44.0));
+        assert_eq!(circle_sweep_degrees(0.0), 0.0);
+        assert_eq!(circle_sweep_degrees(100.0), 360.0);
     }
 
     #[test]
