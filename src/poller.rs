@@ -88,6 +88,17 @@ struct CodexAuthFile {
 struct CodexTokenData {
     access_token: String,
     account_id: Option<String>,
+    id_token: Option<String>,
+}
+
+/// Adapter-owned identity projection. The renderer never opens Codex auth
+/// storage or parses JWT claims directly.
+pub fn codex_account_identity() -> Option<crate::account::AccountIdentity> {
+    let credentials = read_codex_credentials()?;
+    crate::account::from_codex_auth_projection(
+        credentials.account_id,
+        credentials.id_token.as_deref(),
+    )
 }
 
 #[derive(Deserialize)]

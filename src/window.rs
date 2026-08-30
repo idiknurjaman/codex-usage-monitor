@@ -17,6 +17,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::Shell::ExtractIconExW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use crate::account;
 use crate::diagnose;
 use crate::localization::{self, LanguageId, Strings};
 use crate::models::AppUsageData;
@@ -64,7 +65,7 @@ struct AppState {
     language: LanguageId,
     install_channel: InstallChannel,
     widget_style: WidgetStyle,
-    account_initial: Option<char>,
+    account_registry: account::AccountRegistry,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -107,24 +108,6 @@ struct AppState {
     drag_start_offset: i32,
 
     widget_visible: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexIdentityAuthFile {
-    tokens: Option<CodexIdentityTokens>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexIdentityTokens {
-    id_token: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CodexIdentityClaims {
-    name: Option<String>,
-    username: Option<String>,
-    preferred_username: Option<String>,
-    email: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -378,6 +361,11 @@ struct SettingsFile {
     notified_quota_windows: Vec<String>,
     #[serde(default)]
     widget_style: WidgetStyle,
+    #[serde(
+        default,
+        skip_serializing_if = "account::AccountRegistryMetadata::is_empty"
+    )]
+    account_registry: account::AccountRegistryMetadata,
 }
 
 impl Default for SettingsFile {
@@ -397,6 +385,7 @@ impl Default for SettingsFile {
             alert_threshold_percent: 0,
             notified_quota_windows: Vec::new(),
             widget_style: WidgetStyle::Bar,
+            account_registry: account::AccountRegistryMetadata::default(),
         }
     }
 }
@@ -491,6 +480,9 @@ fn normalize_settings(mut settings: SettingsFile) -> SettingsFile {
     }
     settings.notified_quota_windows.sort();
     settings.notified_quota_windows.dedup();
+    settings.account_registry = account::AccountRegistry::from_metadata(settings.account_registry)
+        .map(|registry| registry.metadata())
+        .unwrap_or_default();
     settings
 }
 
@@ -524,79 +516,9 @@ fn save_state_settings() {
             alert_threshold_percent: s.alert_threshold_percent,
             notified_quota_windows: s.notified_quota_windows.iter().cloned().collect(),
             widget_style: s.widget_style,
+            account_registry: s.account_registry.metadata(),
         });
     }
-}
-
-fn codex_identity_auth_path() -> Option<PathBuf> {
-    if let Some(codex_home) = std::env::var_os("CODEX_HOME").map(PathBuf::from) {
-        return Some(codex_home.join("auth.json"));
-    }
-
-    Some(dirs::home_dir()?.join(".codex").join("auth.json"))
-}
-
-fn codex_account_initial() -> Option<char> {
-    let path = codex_identity_auth_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
-    let auth: CodexIdentityAuthFile = serde_json::from_str(&content).ok()?;
-    let id_token = auth.tokens?.id_token?;
-    let payload = id_token.split('.').nth(1)?;
-    let claims: CodexIdentityClaims = serde_json::from_slice(&decode_base64url(payload)?).ok()?;
-
-    account_initial_from_claims(&claims)
-}
-
-fn account_initial_from_claims(claims: &CodexIdentityClaims) -> Option<char> {
-    first_uppercase_initial(claims.name.as_deref())
-        .or_else(|| first_uppercase_initial(claims.username.as_deref()))
-        .or_else(|| first_uppercase_initial(claims.preferred_username.as_deref()))
-        .or_else(|| {
-            claims
-                .email
-                .as_deref()
-                .map(|email| email.split('@').next().unwrap_or(email))
-                .and_then(|local| first_uppercase_initial(Some(local)))
-        })
-}
-
-fn first_uppercase_initial(value: Option<&str>) -> Option<char> {
-    value?
-        .chars()
-        .find(|character| character.is_alphanumeric())
-        .and_then(|character| character.to_uppercase().next())
-}
-
-fn decode_base64url(input: &str) -> Option<Vec<u8>> {
-    let mut output = Vec::new();
-    let mut accumulator = 0u32;
-    let mut bits = 0u8;
-
-    for byte in input.bytes() {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            b'=' => break,
-            _ => return None,
-        } as u32;
-
-        accumulator = (accumulator << 6) | value;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            output.push(((accumulator >> bits) & 0xFF) as u8);
-            if bits == 0 {
-                accumulator = 0;
-            } else {
-                accumulator &= (1u32 << bits) - 1;
-            }
-        }
-    }
-
-    Some(output)
 }
 
 fn format_precise_reset_time(resets_at: Option<SystemTime>) -> Option<String> {
@@ -1637,7 +1559,7 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
         ),
         state.language,
         state.widget_style,
-        state.account_initial,
+        state.account_registry.primary_initial(),
     )
 }
 
@@ -1651,7 +1573,7 @@ fn total_widget_width() -> i32 {
                     active_model_count(s.show_claude_code, s.show_codex, s.show_antigravity),
                     s.language,
                     s.widget_style,
-                    s.account_initial,
+                    s.account_registry.primary_initial(),
                 )
             })
             .unwrap_or((1, LanguageId::English, WidgetStyle::Bar, None))
@@ -1836,7 +1758,11 @@ pub fn run() {
 
         let claude_code_available = poller::claude_code_credentials_available();
         let settings = load_settings(claude_code_available);
-        let account_initial = codex_account_initial();
+        let account_registry = account::AccountRegistry::hydrate(
+            settings.account_registry.clone(),
+            poller::codex_account_identity(),
+        );
+        let account_initial = account_registry.primary_initial();
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
@@ -1904,7 +1830,7 @@ pub fn run() {
                 language,
                 install_channel,
                 widget_style: settings.widget_style,
-                account_initial,
+                account_registry,
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -2085,7 +2011,7 @@ fn render_layered() {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_initial,
+                s.account_registry.primary_initial(),
             ),
             None => return,
         }
@@ -4032,7 +3958,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_initial,
+                s.account_registry.primary_initial(),
             ),
             None => return,
         }
@@ -4638,33 +4564,6 @@ mod tests {
     #[test]
     fn dib_color_value_matches_bitmap_channel_order() {
         assert_eq!(dib_color_value(Color::from_hex("#010203")), 0x010203);
-    }
-
-    #[test]
-    fn account_initial_prefers_name_then_username_then_email_local_part() {
-        let named = CodexIdentityClaims {
-            name: Some("Sidik Nurzaman".into()),
-            username: Some("nurzaman".into()),
-            preferred_username: Some("sidik".into()),
-            email: Some("sidik@example.com".into()),
-        };
-        assert_eq!(account_initial_from_claims(&named), Some('S'));
-
-        let username = CodexIdentityClaims {
-            username: Some("nurzaman".into()),
-            ..CodexIdentityClaims::default()
-        };
-        assert_eq!(account_initial_from_claims(&username), Some('N'));
-
-        let email = CodexIdentityClaims {
-            email: Some("sidik@example.com".into()),
-            ..CodexIdentityClaims::default()
-        };
-        assert_eq!(account_initial_from_claims(&email), Some('S'));
-        assert_eq!(
-            account_initial_from_claims(&CodexIdentityClaims::default()),
-            None
-        );
     }
 
     #[test]
