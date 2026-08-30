@@ -563,6 +563,7 @@ fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<Qu
                 strings.claude_code_model,
                 usage,
                 strings,
+                false,
             );
         }
     }
@@ -578,6 +579,7 @@ fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<Qu
                 strings.codex_model,
                 usage,
                 strings,
+                true,
             );
         }
     }
@@ -593,6 +595,7 @@ fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<Qu
                 strings.antigravity_model,
                 usage,
                 strings,
+                false,
             );
         }
     }
@@ -610,6 +613,7 @@ fn append_provider_alerts(
     provider_label: &str,
     usage: &crate::models::UsageData,
     strings: Strings,
+    percentage_is_remaining: bool,
 ) {
     append_quota_alert(
         alerts,
@@ -622,6 +626,7 @@ fn append_provider_alerts(
         "session",
         strings.session_window,
         &usage.session,
+        percentage_is_remaining,
     );
     append_quota_alert(
         alerts,
@@ -634,6 +639,7 @@ fn append_provider_alerts(
         "weekly",
         strings.weekly_window,
         &usage.weekly,
+        percentage_is_remaining,
     );
 }
 
@@ -649,6 +655,7 @@ fn append_quota_alert(
     window_key: &str,
     window_label: &str,
     section: &crate::models::UsageSection,
+    percentage_is_remaining: bool,
 ) {
     let prefix = format!("{provider_key}:{window_key}:");
     let reset_key = section
@@ -659,7 +666,12 @@ fn append_quota_alert(
     let key = format!("{prefix}{reset_key}");
     notified.retain(|existing| !existing.starts_with(&prefix) || existing == &key);
 
-    let remaining = poller::remaining_percentage(section.percentage).round() as u8;
+    let remaining = if percentage_is_remaining {
+        section.percentage.clamp(0.0, 100.0)
+    } else {
+        poller::remaining_percentage(section.percentage)
+    }
+    .round() as u8;
     if remaining > threshold || !notified.insert(key) {
         return;
     }
@@ -942,13 +954,13 @@ fn refresh_usage_texts(state: &mut AppState) {
     }
 
     if let Some(codex) = data.codex.as_ref() {
-        state.codex_session_text = poller::format_line(
+        state.codex_session_text = poller::format_remaining_line(
             &codex.session,
             strings,
             show_remaining,
             poller::UsageWindowKind::Session,
         );
-        state.codex_weekly_text = poller::format_line(
+        state.codex_weekly_text = poller::format_remaining_line(
             &codex.weekly,
             strings,
             show_remaining,
@@ -1465,11 +1477,15 @@ fn usage_layout_widths(language: LanguageId) -> (i32, i32) {
     }
 }
 
-fn usage_percent_for_display(language: LanguageId, used_percentage: f64) -> f64 {
-    if language == LanguageId::SimplifiedChinese {
-        poller::remaining_percentage(used_percentage)
+fn usage_percent_for_display(
+    language: LanguageId,
+    percentage: f64,
+    percentage_is_remaining: bool,
+) -> f64 {
+    if percentage_is_remaining || language != LanguageId::SimplifiedChinese {
+        percentage.clamp(0.0, 100.0)
     } else {
-        used_percentage.clamp(0.0, 100.0)
+        poller::remaining_percentage(percentage)
     }
 }
 
@@ -2044,12 +2060,14 @@ fn paint_content(
     antigravity_accent: &Color,
 ) {
     unsafe {
-        let session_pct = usage_percent_for_display(language, session_pct);
-        let weekly_pct = usage_percent_for_display(language, weekly_pct);
-        let codex_session_pct = usage_percent_for_display(language, codex_session_pct);
-        let codex_weekly_pct = usage_percent_for_display(language, codex_weekly_pct);
-        let antigravity_session_pct = usage_percent_for_display(language, antigravity_session_pct);
-        let antigravity_weekly_pct = usage_percent_for_display(language, antigravity_weekly_pct);
+        let session_pct = usage_percent_for_display(language, session_pct, false);
+        let weekly_pct = usage_percent_for_display(language, weekly_pct, false);
+        let codex_session_pct = usage_percent_for_display(language, codex_session_pct, true);
+        let codex_weekly_pct = usage_percent_for_display(language, codex_weekly_pct, true);
+        let antigravity_session_pct =
+            usage_percent_for_display(language, antigravity_session_pct, false);
+        let antigravity_weekly_pct =
+            usage_percent_for_display(language, antigravity_weekly_pct, false);
         let (label_width, text_width) = usage_layout_widths(language);
 
         let client_rect = RECT {
@@ -4159,7 +4177,7 @@ mod tests {
         let mut notified = BTreeSet::new();
         let first_reset = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
         let first = crate::models::UsageSection {
-            percentage: 85.0,
+            percentage: 15.0,
             resets_at: Some(first_reset),
         };
 
@@ -4174,6 +4192,7 @@ mod tests {
             "session",
             "5小时",
             &first,
+            true,
         );
         append_quota_alert(
             &mut alerts,
@@ -4186,12 +4205,13 @@ mod tests {
             "session",
             "5小时",
             &first,
+            true,
         );
         assert_eq!(alerts.len(), 1);
         assert!(alerts[0].message.contains("仅剩 15%"));
 
         let next = crate::models::UsageSection {
-            percentage: 90.0,
+            percentage: 10.0,
             resets_at: Some(first_reset + Duration::from_secs(18_000)),
         };
         append_quota_alert(
@@ -4205,6 +4225,7 @@ mod tests {
             "session",
             "5小时",
             &next,
+            true,
         );
         assert_eq!(alerts.len(), 2);
         assert_eq!(notified.len(), 1);

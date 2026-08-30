@@ -953,7 +953,7 @@ fn codex_window_kind(window: &CodexRateLimitWindow) -> Option<UsageWindowKind> {
 
 fn codex_section_from_window(window: &CodexRateLimitWindow) -> UsageSection {
     UsageSection {
-        percentage: window.used_percent,
+        percentage: remaining_percentage(window.used_percent),
         resets_at: unix_to_system_time(Some(window.reset_at)),
     }
 }
@@ -1616,8 +1616,37 @@ pub fn format_line(
     show_remaining_in_chinese: bool,
     window: UsageWindowKind,
 ) -> String {
+    format_line_with_semantics(section, strings, show_remaining_in_chinese, window, false)
+}
+
+/// Format a usage section whose adapter has already normalized the value to
+/// remaining percentage.
+pub fn format_remaining_line(
+    section: &UsageSection,
+    strings: Strings,
+    show_remaining_in_chinese: bool,
+    window: UsageWindowKind,
+) -> String {
+    format_line_with_semantics(section, strings, show_remaining_in_chinese, window, true)
+}
+
+fn format_line_with_semantics(
+    section: &UsageSection,
+    strings: Strings,
+    show_remaining_in_chinese: bool,
+    window: UsageWindowKind,
+    percentage_is_remaining: bool,
+) -> String {
     if show_remaining_in_chinese {
-        return format_simplified_chinese_line(section, window);
+        let remaining = if percentage_is_remaining {
+            section.percentage.clamp(0.0, 100.0)
+        } else {
+            remaining_percentage(section.percentage)
+        };
+        let reset = section
+            .resets_at
+            .and_then(native_interop::system_time_to_local);
+        return format_simplified_chinese_values(remaining, reset, window);
     }
 
     let pct = format!("{:.0}%", section.percentage);
@@ -1627,14 +1656,6 @@ pub fn format_line(
     } else {
         format!("{pct} \u{00b7} {cd}")
     }
-}
-
-fn format_simplified_chinese_line(section: &UsageSection, window: UsageWindowKind) -> String {
-    let remaining = remaining_percentage(section.percentage);
-    let reset = section
-        .resets_at
-        .and_then(native_interop::system_time_to_local);
-    format_simplified_chinese_values(remaining, reset, window)
 }
 
 fn format_simplified_chinese_values(
@@ -1764,9 +1785,45 @@ mod tests {
 
     #[test]
     fn remaining_percentage_is_clamped() {
+        assert_eq!(remaining_percentage(0.0), 100.0);
         assert_eq!(remaining_percentage(30.0), 70.0);
+        assert_eq!(remaining_percentage(100.0), 0.0);
         assert_eq!(remaining_percentage(-5.0), 100.0);
         assert_eq!(remaining_percentage(120.0), 0.0);
+    }
+
+    #[test]
+    fn codex_used_percent_is_normalized_to_remaining_and_preserves_reset_time() {
+        let response: CodexUsageResponse = serde_json::from_str(
+            r#"{
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 81,
+                        "reset_at": 1784500338,
+                        "limit_window_seconds": 18000
+                    },
+                    "secondary_window": {
+                        "used_percent": 55,
+                        "reset_at": 1785000000,
+                        "limit_window_seconds": 604800
+                    }
+                }
+            }"#,
+        )
+        .expect("Codex response should deserialize");
+
+        let usage = codex_usage_from_response(response).expect("rate limit should be available");
+
+        assert_eq!(usage.session.percentage, 19.0);
+        assert_eq!(usage.weekly.percentage, 45.0);
+        assert_eq!(
+            usage.session.resets_at,
+            unix_to_system_time(Some(1784500338))
+        );
+        assert_eq!(
+            usage.weekly.resets_at,
+            unix_to_system_time(Some(1785000000))
+        );
     }
 
     #[test]
@@ -1789,7 +1846,7 @@ mod tests {
 
         assert_eq!(usage.session.percentage, 0.0);
         assert!(usage.session.resets_at.is_none());
-        assert_eq!(usage.weekly.percentage, 21.0);
+        assert_eq!(usage.weekly.percentage, 79.0);
         assert!(usage.weekly.resets_at.is_some());
     }
 
@@ -1813,8 +1870,8 @@ mod tests {
 
         let usage = codex_usage_from_response(response).expect("rate limit should be available");
 
-        assert_eq!(usage.session.percentage, 18.0);
-        assert_eq!(usage.weekly.percentage, 33.0);
+        assert_eq!(usage.session.percentage, 82.0);
+        assert_eq!(usage.weekly.percentage, 67.0);
     }
 
     #[test]
@@ -1843,6 +1900,14 @@ mod tests {
         assert_eq!(
             format_line(&section, strings, true, UsageWindowKind::Session),
             "剩余70%"
+        );
+        let codex_section = UsageSection {
+            percentage: 19.0,
+            resets_at: None,
+        };
+        assert_eq!(
+            format_remaining_line(&codex_section, strings, true, UsageWindowKind::Session),
+            "剩余19%"
         );
         let session_reset = windows::Win32::Foundation::SYSTEMTIME {
             wHour: 18,
