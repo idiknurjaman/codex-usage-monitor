@@ -1367,6 +1367,55 @@ mod tests {
     }
 
     #[test]
+    fn full_capacity_unknown_identity_is_current_only_without_eviction_or_owner_theft() {
+        let mut registry = AccountRegistry::empty();
+        for index in 1..=MAX_RETAINED_ACCOUNTS {
+            registry
+                .try_add(monitored(
+                    &format!("account-{index}"),
+                    Some("Account"),
+                    handle(index as u32),
+                ))
+                .unwrap();
+        }
+        let retained_before = registry.metadata();
+        let unknown = identity("account-e", Some("Unknown"));
+
+        assert!(!registry.reconcile_working_identity(&unknown, true));
+        assert_eq!(registry.len(), MAX_RETAINED_ACCOUNTS);
+        assert!(registry.account_by_id("account-e").is_none());
+        assert_eq!(registry.metadata(), retained_before);
+        assert_eq!(registry.display_initial(unknown.initial()), Some('U'));
+    }
+
+    #[test]
+    fn freeing_capacity_allows_later_current_identity_retention() {
+        let mut registry = AccountRegistry::empty();
+        for index in 1..=MAX_RETAINED_ACCOUNTS {
+            registry
+                .try_add(monitored(
+                    &format!("account-{index}"),
+                    Some("Account"),
+                    handle(index as u32),
+                ))
+                .unwrap();
+        }
+        let unknown = identity("account-e", Some("Unknown"));
+
+        assert!(!registry.reconcile_working_identity(&unknown, true));
+        assert!(registry.remove_by_id("account-4").is_some());
+        assert!(registry.reconcile_working_identity(&unknown, true));
+        assert_eq!(registry.len(), MAX_RETAINED_ACCOUNTS);
+        assert_eq!(
+            registry.account_by_id("account-e").unwrap().auth_handle,
+            None
+        );
+        assert!(registry.account_by_id("account-1").is_some());
+        assert!(registry.account_by_id("account-2").is_some());
+        assert!(registry.account_by_id("account-3").is_some());
+    }
+
+    #[test]
     fn legacy_slot_metadata_migrates_to_dynamic_owner_handle() {
         let legacy = r#"{
             "id":"account-a",
@@ -1495,6 +1544,69 @@ mod tests {
         assert_eq!(reauth_owner, remove_owner);
         let owner_text = reauth_owner.to_string_lossy().replace('/', "\\");
         assert!(owner_text.ends_with(r"CodexUsage\monitor-auth\slot-1"));
+    }
+
+    #[test]
+    fn initial_usage_success_is_recorded_against_selected_account_only() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored("account-a", Some("Alice"), handle(1)))
+            .unwrap();
+        registry
+            .try_add(monitored("account-b", Some("Bob"), handle(2)))
+            .unwrap();
+
+        let mut usage = UsageData::default();
+        usage.session.used_percentage = Some(81.0);
+        usage.weekly.used_percentage = Some(55.0);
+        assert!(registry.record_usage("account-b", usage));
+
+        assert!(registry.accounts()[0].usage.is_none());
+        assert_eq!(
+            registry.accounts()[1]
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.session.used_percentage),
+            Some(81.0)
+        );
+        assert_eq!(
+            registry.accounts()[1]
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.weekly.used_percentage),
+            Some(55.0)
+        );
+        assert_eq!(
+            registry.accounts()[1].connection_state,
+            ConnectionState::Connected
+        );
+        assert!(registry.accounts()[1].last_success_at.is_some());
+    }
+
+    #[test]
+    fn initial_usage_failure_is_scoped_to_selected_account() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored("account-a", Some("Alice"), handle(1)))
+            .unwrap();
+        registry
+            .try_add(monitored("account-b", Some("Bob"), handle(2)))
+            .unwrap();
+
+        assert!(registry.record_usage_error("account-b", "initial_usage_unavailable"));
+        assert_eq!(
+            registry.accounts()[0].connection_state,
+            ConnectionState::Connected
+        );
+        assert!(registry.accounts()[0].last_error.is_none());
+        assert_eq!(
+            registry.accounts()[1].connection_state,
+            ConnectionState::Unavailable
+        );
+        assert_eq!(
+            registry.accounts()[1].last_error.as_deref(),
+            Some("initial_usage_unavailable")
+        );
     }
 
     #[test]
