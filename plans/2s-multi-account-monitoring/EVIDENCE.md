@@ -512,12 +512,29 @@ keyring credentials, or synthetic files in production monitor namespaces.
 
 #### Class R — real-account runtime boundary
 
-No new real-account walkthrough was run for this source checkpoint. The
-accepted Phase 02 Class R proof remains valid for its two-account lifecycle,
-but it does not prove Phase 03 simultaneous independent polling, per-account
-failure recovery, or account-scoped alert delivery. Those runtime claims are
-explicitly `NOT YET PROVEN` and remain for Sol/Sidik's Phase 03 runtime gate.
-No third/fourth/fifth real account is required by the current proof contract.
+Owner-observed walkthrough by Sidik against the Phase 03 implementation
+checkpoint is complete. This is credential-sensitive runtime evidence for the
+two available real accounts; no third/fourth/fifth real account is required by
+the current proof contract.
+
+| Scenario | Result | Owner-observed proof |
+|---|---|---|
+| Account A active and healthy | PASS | A polled successfully as the current active account. |
+| Normal Codex switch A → B without restart | PASS | B became current without losing A's retained state. |
+| Distinct A/B usage attribution | PASS | A and B displayed distinct usage values attached to the correct identities. |
+| Switch B → A | PASS | A became current again and attribution remained correct. |
+| Remove inactive B while A remains current | PASS | B retention/owner state was removed while A remained healthy. |
+| Switch to removed B | PASS | B was auto-discovered as current-only/ownerless; no retained owner was borrowed. |
+| Switch back to A | PASS | A remained healthy and B stayed retained only as the ownerless current-derived state observed in the walkthrough. |
+| B recovery affordance | PASS | `Re-authenticate` remained available for B; no duplicate identity row appeared. |
+| Credential ownership / eviction safety | PASS bounded | No evidence of credential borrowing, account eviction, or cross-account corruption was observed. |
+
+The current-only/ownerless B state showed a partial or unavailable quota
+window. This is an intentional safe result: missing or unsafe data was not
+converted into synthetic `0%` remaining. The runtime walkthrough did not claim
+separate alert-balloon delivery or an auth-expiry event beyond the source/F/S
+isolation proof above; those remain explicitly `NOT YET PROVEN` if required by
+the final Sol matrix interpretation.
 
 #### Verification
 

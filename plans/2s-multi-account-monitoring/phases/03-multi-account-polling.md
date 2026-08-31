@@ -1,6 +1,6 @@
 # Phase 03 — Multi-Account Polling
 
-**Status:** `in-progress — authorized`
+**Status:** `ready-for-sol-final-gate`
 **Goal:** poll the account collection independently, preserve stable attribution and runtime active role, and isolate failures/alerts without account-position hard-coding.
 
 ## Preconditions
@@ -101,4 +101,8 @@ When current identity changes:
 
 ## Evidence
 
-Record current tests plus runtime proof of distinct simultaneous account values, one-account failure isolation, active-role switch attribution, and a four-retained-account smoke test in `../EVIDENCE.md` at the exact implementation checkpoint.
+Record current tests plus Class R runtime proof of distinct simultaneous account
+values, one-account failure isolation, active-role switch attribution, and a
+four-retained-account Class F/S smoke test in `../EVIDENCE.md` at the exact
+implementation checkpoint. Phase 03 stops here for Sol final-gate review;
+Phase 04 remains blocked.

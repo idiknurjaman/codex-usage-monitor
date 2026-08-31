@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring — Test Matrix
 
 **Plan:** `2s-multi-account-monitoring`
-**Status:** `not-run for amended model`
+**Status:** `Phase 03 ready for Sol final gate; Phase 04 not started`
 **Product policy:** maximum four retained accounts; collection-driven/N-capable implementation
 
 Evidence must be current to the exact implementation checkpoint under review. Historical PASS results prove only their historical checkpoints and do not prove the amended account model.
@@ -24,16 +24,16 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | AUTH-14 | Identity mismatch | Re-auth B resolves to different identity X | B not silently replaced; owner state safely rolled back/reconciled | pending |
 | DATA-01 | Semantics | Codex API reports used 81/55 | Canonical used values remain 81/55; UI remaining 19/45 | pending |
 | DATA-02 | Missing window | Weekly-only response | Session unavailable, not 0%; weekly correct | pending |
-| DATA-03 | Attribution | Multiple accounts return different quota values | Values stay attached to correct stable identities | pending |
-| DATA-04 | Reset | Accounts have different reset times | Each account/window keeps its own countdown/reset | pending |
-| DATA-05 | Active role | Working identity changes A → B | Active marker moves to B; quota ownership does not move between identities | pending |
-| POLL-01 | Collection | Poll 1, 2, and 4 retained accounts | Same collection-driven orchestration; no fixed account branches | pending |
-| POLL-02 | Isolation | A poll succeeds; B fails; C/D healthy | Healthy accounts continue updating; B failure account-scoped | pending |
-| POLL-03 | Auth isolation | B monitor auth expires | Only B requests re-auth; other accounts continue | pending |
-| POLL-04 | Zero inference | Observe monitor poll/refresh process behavior | No `codex exec` or intentional inference request | pending |
-| POLL-05 | Current-only | Unknown active E at full retained capacity | Safe working-account usage may display; no retained owner borrowed/evicted | pending |
-| ALERT-01 | Scope | Multiple accounts cross same threshold | Each stable identity can notify independently | pending |
-| ALERT-02 | Dedup | Same account/window repeatedly polled before reset | Notification emitted once per identity/window/threshold/reset | pending |
+| DATA-03 | Attribution | Multiple accounts return different quota values | Values stay attached to correct stable identities | Class R — PASS: Sidik observed distinct A/B usage with correct attribution; Class F/S result-application proof also PASS |
+| DATA-04 | Reset | Accounts have different reset times | Each account/window keeps its own countdown/reset | Class S — PASS: per-account reset state and collection scheduling are implemented; no separate reset-time runtime claim |
+| DATA-05 | Active role | Working identity changes A → B | Active marker moves to B; quota ownership does not move between identities | Class R — PASS: A↔B switches preserved attribution and retention |
+| POLL-01 | Collection | Poll 1, 2, and 4 retained accounts | Same collection-driven orchestration; no fixed account branches | Class F/S — PASS: collection plan iterates identities and independent owners |
+| POLL-02 | Isolation | A poll succeeds; B fails; C/D healthy | Healthy accounts continue updating; B failure account-scoped | Class R + F/S — PASS: A remained healthy while B became partial/unavailable; deterministic scoped-failure test PASS |
+| POLL-03 | Auth isolation | B monitor auth expires | Only B requests re-auth; other accounts continue | Class S — PASS for owner-scoped auth failure; Class R expiry-specific event not claimed |
+| POLL-04 | Zero inference | Observe monitor poll/refresh process behavior | No `codex exec` or intentional inference request | Class S — PASS: collection path uses direct owner/working reads and excludes legacy inference fallback |
+| POLL-05 | Current-only | Unknown active E at full retained capacity | Safe working-account usage may display; no retained owner borrowed/evicted | Class R + F — PASS: ownerless current-only behavior observed; full-capacity no-eviction fixture PASS |
+| ALERT-01 | Scope | Multiple accounts cross same threshold | Each stable identity can notify independently | Class F/S — PASS: opaque per-identity alert fixture PASS |
+| ALERT-02 | Dedup | Same account/window repeatedly polled before reset | Notification emitted once per identity/window/threshold/reset | Class F/S — PASS: per-identity/window/threshold/reset dedup fixture PASS |
 | LIFE-01 | Auto discovery | Startup with working A | A appears without manual Add | pending |
 | LIFE-02 | Active switch | Working Codex changes A → B | B active; A remains retained; no duplicate row | pending |
 | LIFE-03 | Manual add | Add B while A active | B added/owner provisioned without switching Codex | pending |
@@ -66,11 +66,11 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | ARCH-03 | Policy | Inspect capacity enforcement | Max four retained accounts enforced as policy/validation | pending |
 | MIG-01 | Settings | Existing settings without registry | App starts with valid working-account behavior | pending |
 | MIG-02 | Two-slot metadata | Existing Phase-01/02 `slot-1/slot-2` settings | Migrates/reconstructs safely into generalized owner-handle model | pending |
-| BUILD-01 | Formatting | `cargo fmt --check` | PASS | pending |
-| BUILD-02 | Tests | `cargo test` | PASS | pending |
-| BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | pending |
-| BUILD-04 | Release build | `cargo build --release` | PASS | pending |
-| BUILD-05 | Diff hygiene | `git diff --check` | PASS | pending |
+| BUILD-01 | Formatting | `cargo fmt --check` | PASS | Class S — PASS at `acb870d204d83bcba71534aeab5910784e74b1c1` |
+| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 76/76 tests at `acb870d204d83bcba71534aeab5910784e74b1c1` |
+| BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | Class S — PASS exit; existing warnings only |
+| BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: optimized release build completed |
+| BUILD-05 | Diff hygiene | `git diff --check` | PASS | Class S — PASS |
 | SEC-01 | Working state | Compare normal Codex state before/after lifecycle | Auth/session/history/config source of truth not mutated by monitor management | pending |
 | SEC-02 | Token ownership | Review monitor owners | No refresh token duplicated across independently refreshing owners | pending |
 | SEC-03 | Active role | Inspect persistence | Active/current role not persisted as credential ownership | pending |
