@@ -7,7 +7,7 @@
 - **Current phase:** `02-account-login`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `97657d794aed4aaf857a005e2d79e363b8b926f5`
+- **Implementation checkpoint:** `99097750a4a97b98e5b2912496bfb782018dd72b`
 
 ## Baseline evidence
 
@@ -371,12 +371,12 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 **Status:** `READY FOR SOL REVIEW — amended source checkpoint`
 
-Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `97657d794aed4aaf857a005e2d79e363b8b926f5`.
+Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `99097750a4a97b98e5b2912496bfb782018dd72b`.
 
 #### Collection-driven account model
 
 - `AccountRegistry` is a deterministic collection with policy `MAX_RETAINED_ACCOUNTS = 4`; capacity is not encoded as account-position variants.
-- `MonitorAuthHandle` is a typed dynamic positive owner index. New serialized values are `owner-N` and runtime namespaces are `monitor-auth/owner-N`; legacy `slot-N` input is accepted only for safe metadata reconstruction. No `auth-spike` namespace or absolute path is serialized or resolved.
+- `MonitorAuthHandle` is a typed dynamic positive owner index. New serialized values are `owner-N`; physical production namespaces remain the continuity-preserving `monitor-auth/slot-N` owner paths used by re-auth, rollback, and remove cleanup. Legacy `slot-N` input is accepted and resolves to the same typed owner. No `auth-spike` namespace or absolute path is serialized or resolved.
 - `auth_handle` is optional. Automatic working-account discovery may retain an identity without an independent owner and marks it `ReauthRequired` when it becomes inactive; no working access/refresh token is copied.
 - Startup and existing normal polling observations project the current working Codex identity into runtime state. A known identity is updated without duplication; a new identity is auto-retained when capacity exists; at capacity it is current-only and retained accounts are not evicted.
 - Active status is derived from the runtime working identity and is absent from `AccountRegistryMetadata`/settings.
@@ -394,9 +394,9 @@ Phase 02 is the active phase. The superseded two-account runtime walkthrough is 
 #### Automated acceptance evidence
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 62 passed, 0 failed.
+- `cargo test --locked`: PASS — 64 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing warnings remain in legacy `poller.rs`/`window.rs` code, with no amended account-model warning introduced.
-- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-amended-release-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-amended-release-target\release\codex-usage.exe`.
+- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-corrections-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-corrections-target\release\codex-usage.exe`.
 - `git diff --check`: PASS before source checkpoint.
 
 #### Focused regression coverage
@@ -404,10 +404,11 @@ Phase 02 is the active phase. The superseded two-account runtime walkthrough is 
 The 62-test suite includes coverage for:
 
 - four-account retention policy and dynamic owner allocation without `Slot1`/`Slot2` type variants;
-- legacy `slot-N` metadata input migrating to serialized `owner-N`, with no `auth-spike` or absolute path;
+- legacy `slot-N` metadata input migrating to serialized `owner-N` while preserving physical `monitor-auth/slot-N` owner continuity for re-auth/remove, with no `auth-spike` or absolute path;
 - automatic identity discovery with ownerless active identity, inactive `ReauthRequired` state, and no working-owner copy;
 - manual duplicate reconciliation attaching an owner to one existing identity and refusing a second owner/row;
 - runtime active-role matching remaining outside persisted metadata;
+- current identity `B` taking precedence over retained registry order `[A, B]` after current usage is recorded, so transitional display cannot show `A` for current `B`;
 - direct account labels preferring display name plus runtime `· Active` marker;
 - fifth manual Add preflight disabled at four retained accounts and while lifecycle work is busy;
 - current-account removal suppression/current-only behavior;
