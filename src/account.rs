@@ -42,7 +42,7 @@ impl MonitorAuthHandle {
     }
 
     pub fn namespace_key(self) -> String {
-        format!("monitor-auth/owner-{}", self.index())
+        format!("monitor-auth/slot-{}", self.index())
     }
 
     /// Resolve the clean production owner root at runtime. This path is never
@@ -300,8 +300,8 @@ impl AccountRegistry {
         Ok(registry)
     }
 
-    pub fn display_initial(&self, legacy_initial: Option<char>) -> Option<char> {
-        self.primary_initial().or(legacy_initial)
+    pub fn display_initial(&self, current_initial: Option<char>) -> Option<char> {
+        current_initial.or_else(|| self.primary_initial())
     }
 
     pub fn accounts(&self) -> &[MonitoredAccount] {
@@ -1266,8 +1266,8 @@ mod tests {
             serde_json::from_str::<MonitoredAccountMetadata>(&serialized).unwrap(),
             metadata
         );
-        assert_eq!(handle(1).namespace_key(), "monitor-auth/owner-1");
-        assert_eq!(handle(2).namespace_key(), "monitor-auth/owner-2");
+        assert_eq!(handle(1).namespace_key(), "monitor-auth/slot-1");
+        assert_eq!(handle(2).namespace_key(), "monitor-auth/slot-2");
         assert!(!serialized.contains("auth-spike"));
         assert!(!serialized.contains("C:"));
     }
@@ -1455,6 +1455,46 @@ mod tests {
         assert_eq!(registry.metadata().accounts[1].auth_handle, Some(handle(2)));
         let serialized = serde_json::to_string(&registry.metadata()).unwrap();
         assert!(!serialized.contains("active"));
+    }
+
+    #[test]
+    fn current_identity_precedes_registry_order_for_transitional_display() {
+        let mut registry = AccountRegistry::empty();
+        let account_a = identity("account-a", Some("Alice"));
+        let account_b = identity("account-b", Some("Bob"));
+        registry
+            .try_add(MonitoredAccount::from_identity(&account_a, Some(handle(1))))
+            .unwrap();
+        registry
+            .try_add(MonitoredAccount::from_identity(&account_b, Some(handle(2))))
+            .unwrap();
+
+        let mut current_usage = UsageData::default();
+        current_usage.session.used_percentage = Some(55.0);
+        current_usage.weekly.used_percentage = Some(20.0);
+        assert!(registry.record_usage("account-b", current_usage));
+        assert_eq!(registry.primary_initial(), Some('A'));
+        assert_eq!(registry.display_initial(account_b.initial()), Some('B'));
+    }
+
+    #[test]
+    fn legacy_owner_continuity_keeps_reauth_and_remove_on_same_physical_namespace() {
+        let legacy: MonitoredAccountMetadata = serde_json::from_str(
+            r#"{
+                "id":"account-a",
+                "initial":"A",
+                "enabled":true,
+                "auth_handle":"slot-1"
+            }"#,
+        )
+        .unwrap();
+        let handle = legacy.auth_handle.unwrap();
+        let reauth_owner = handle.storage_path().unwrap();
+        let remove_owner = handle.storage_path().unwrap();
+
+        assert_eq!(reauth_owner, remove_owner);
+        let owner_text = reauth_owner.to_string_lossy().replace('/', "\\");
+        assert!(owner_text.ends_with(r"CodexUsage\monitor-auth\slot-1"));
     }
 
     #[test]
