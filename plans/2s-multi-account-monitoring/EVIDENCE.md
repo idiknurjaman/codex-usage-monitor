@@ -422,7 +422,7 @@ The amended owner-approved UI/runtime walkthrough has not been run from this imp
 
 Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
 
-**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `97657d794aed4aaf857a005e2d79e363b8b926f5`; real-account runtime proof is explicitly open.
+**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `99097750a4a97b98e5b2912496bfb782018dd72b`; real-account runtime proof is explicitly open.
 
 ### Phase 03 — Multi-Account Polling
 
