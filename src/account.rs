@@ -22,8 +22,8 @@ pub enum MonitorAuthHandle {
 impl MonitorAuthHandle {
     pub const fn namespace_key(self) -> &'static str {
         match self {
-            Self::Slot1 => "auth-spike/slot-1",
-            Self::Slot2 => "auth-spike/slot-2",
+            Self::Slot1 => "monitor-auth/slot-1",
+            Self::Slot2 => "monitor-auth/slot-2",
         }
     }
 }
@@ -123,6 +123,7 @@ pub enum RegistryError {
     EmptyIdentity,
     CapacityReached,
     DuplicateIdentity,
+    DuplicateAuthOwner,
 }
 
 impl fmt::Display for RegistryError {
@@ -131,6 +132,7 @@ impl fmt::Display for RegistryError {
             Self::EmptyIdentity => "account identity must not be empty",
             Self::CapacityReached => "maximum monitored account count is two",
             Self::DuplicateIdentity => "account identity is already registered",
+            Self::DuplicateAuthOwner => "monitor auth owner is already registered",
         })
     }
 }
@@ -196,15 +198,22 @@ impl AccountRegistry {
         if account.id.trim().is_empty() {
             return Err(RegistryError::EmptyIdentity);
         }
-        if self.accounts.len() >= MAX_MONITORED_ACCOUNTS {
-            return Err(RegistryError::CapacityReached);
-        }
         if self
             .accounts
             .iter()
             .any(|existing| existing.id == account.id)
         {
             return Err(RegistryError::DuplicateIdentity);
+        }
+        if self
+            .accounts
+            .iter()
+            .any(|existing| existing.auth_handle == account.auth_handle)
+        {
+            return Err(RegistryError::DuplicateAuthOwner);
+        }
+        if self.accounts.len() >= MAX_MONITORED_ACCOUNTS {
+            return Err(RegistryError::CapacityReached);
         }
         self.accounts.push(account);
         Ok(())
@@ -397,9 +406,9 @@ mod tests {
                 Some("Ray"),
                 MonitorAuthHandle::Slot1
             )),
-            Err(RegistryError::CapacityReached)
+            Err(RegistryError::DuplicateAuthOwner)
         );
-        assert_eq!(registry.len(), 2);
+        assert_eq!(registry.len(), MAX_MONITORED_ACCOUNTS);
         assert!(!registry.is_empty());
         assert!(registry.remove_by_id("account-a").is_some());
         assert_eq!(registry.len(), 1);
@@ -428,6 +437,29 @@ mod tests {
         let metadata = registry.metadata();
         assert_eq!(metadata.accounts[0].id, "account-a");
         assert_eq!(metadata.accounts[1].id, "account-b");
+    }
+
+    #[test]
+    fn distinct_auth_owners_allow_two_accounts() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored(
+                "account-a",
+                Some("Alice"),
+                MonitorAuthHandle::Slot1,
+            ))
+            .unwrap();
+        registry
+            .try_add(monitored(
+                "account-b",
+                Some("Bob"),
+                MonitorAuthHandle::Slot2,
+            ))
+            .unwrap();
+
+        assert_eq!(registry.len(), 2);
+        assert_eq!(registry.accounts()[0].auth_handle, MonitorAuthHandle::Slot1);
+        assert_eq!(registry.accounts()[1].auth_handle, MonitorAuthHandle::Slot2);
     }
 
     #[test]
@@ -464,12 +496,14 @@ mod tests {
         );
         assert_eq!(
             MonitorAuthHandle::Slot1.namespace_key(),
-            "auth-spike/slot-1"
+            "monitor-auth/slot-1"
         );
         assert_eq!(
             MonitorAuthHandle::Slot2.namespace_key(),
-            "auth-spike/slot-2"
+            "monitor-auth/slot-2"
         );
+        assert!(!serialized.contains("auth-spike"));
+        assert!(!serialized.contains("C:"));
     }
 
     #[test]
@@ -488,5 +522,82 @@ mod tests {
         let registry = AccountRegistry::empty();
         assert_eq!(registry.len(), 0);
         assert_eq!(registry.display_initial(active.initial()), Some('S'));
+    }
+
+    #[test]
+    fn duplicate_auth_owner_is_rejected_in_add_and_reconstruction() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored(
+                "account-a",
+                Some("Sam"),
+                MonitorAuthHandle::Slot1,
+            ))
+            .unwrap();
+        assert_eq!(
+            registry.try_add(monitored(
+                "account-b",
+                Some("Nina"),
+                MonitorAuthHandle::Slot1,
+            )),
+            Err(RegistryError::DuplicateAuthOwner)
+        );
+
+        let metadata = AccountRegistryMetadata {
+            accounts: vec![
+                MonitoredAccountMetadata {
+                    id: "account-a".to_string(),
+                    initial: Some('S'),
+                    enabled: true,
+                    auth_handle: MonitorAuthHandle::Slot1,
+                },
+                MonitoredAccountMetadata {
+                    id: "account-b".to_string(),
+                    initial: Some('N'),
+                    enabled: true,
+                    auth_handle: MonitorAuthHandle::Slot1,
+                },
+            ],
+        };
+        assert!(matches!(
+            AccountRegistry::from_metadata(metadata),
+            Err(RegistryError::DuplicateAuthOwner)
+        ));
+    }
+
+    #[test]
+    fn full_registry_classifies_identity_and_owner_duplicates_before_capacity() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored(
+                "account-a",
+                Some("Sam"),
+                MonitorAuthHandle::Slot1,
+            ))
+            .unwrap();
+        registry
+            .try_add(monitored(
+                "account-b",
+                Some("Nina"),
+                MonitorAuthHandle::Slot2,
+            ))
+            .unwrap();
+
+        assert_eq!(
+            registry.try_add(monitored(
+                "account-a",
+                Some("Alex"),
+                MonitorAuthHandle::Slot2,
+            )),
+            Err(RegistryError::DuplicateIdentity)
+        );
+        assert_eq!(
+            registry.try_add(monitored(
+                "account-c",
+                Some("Ray"),
+                MonitorAuthHandle::Slot1,
+            )),
+            Err(RegistryError::DuplicateAuthOwner)
+        );
     }
 }
