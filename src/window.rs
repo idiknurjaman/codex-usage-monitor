@@ -66,7 +66,9 @@ struct AppState {
     install_channel: InstallChannel,
     widget_style: WidgetStyle,
     account_registry: account::AccountRegistry,
-    legacy_account_initial: Option<char>,
+    current_working_identity: Option<account::AccountIdentity>,
+    removed_current_account_ids: BTreeSet<String>,
+    account_menu_routes: Vec<AccountMenuRoute>,
     account_login: Option<account::LoginOperation>,
     account_cleanup: Option<account::CleanupOperation>,
     account_initial_usage: Option<account::InitialUsageOperation>,
@@ -123,6 +125,25 @@ enum UpdateStatus {
     Available(ReleaseDescriptor),
 }
 
+#[derive(Clone)]
+enum AccountMenuAction {
+    Reauthenticate(String),
+    Remove(String),
+}
+
+#[derive(Clone)]
+struct AccountMenuRoute {
+    command_id: u16,
+    action: AccountMenuAction,
+}
+
+#[derive(Clone)]
+struct AccountMenuEntry {
+    account_id: String,
+    label: String,
+    retained: bool,
+}
+
 const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
 
 const POLL_1_MIN: u32 = 60_000;
@@ -163,10 +184,7 @@ const IDM_STYLE_BAR: u16 = 90;
 const IDM_STYLE_CIRCLE: u16 = 91;
 const IDM_ACCOUNT_ADD: u16 = 100;
 const IDM_ACCOUNT_CANCEL: u16 = 101;
-const IDM_ACCOUNT_REAUTH_SLOT1: u16 = 110;
-const IDM_ACCOUNT_REAUTH_SLOT2: u16 = 111;
-const IDM_ACCOUNT_REMOVE_SLOT1: u16 = 120;
-const IDM_ACCOUNT_REMOVE_SLOT2: u16 = 121;
+const IDM_ACCOUNT_ACTION_BASE: u16 = 110;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -1578,9 +1596,12 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
         ),
         state.language,
         state.widget_style,
-        state
-            .account_registry
-            .display_initial(state.legacy_account_initial),
+        state.account_registry.display_initial(
+            state
+                .current_working_identity
+                .as_ref()
+                .and_then(account::AccountIdentity::initial),
+        ),
     )
 }
 
@@ -1594,7 +1615,11 @@ fn total_widget_width() -> i32 {
                     active_model_count(s.show_claude_code, s.show_codex, s.show_antigravity),
                     s.language,
                     s.widget_style,
-                    s.account_registry.display_initial(s.legacy_account_initial),
+                    s.account_registry.display_initial(
+                        s.current_working_identity
+                            .as_ref()
+                            .and_then(account::AccountIdentity::initial),
+                    ),
                 )
             })
             .unwrap_or((1, LanguageId::English, WidgetStyle::Bar, None))
@@ -1779,15 +1804,20 @@ pub fn run() {
 
         let claude_code_available = poller::claude_code_credentials_available();
         let settings = load_settings(claude_code_available);
-        let account_registry =
+        let current_working_identity = poller::codex_account_identity();
+        let mut account_registry =
             account::AccountRegistry::from_metadata(settings.account_registry.clone())
                 .unwrap_or_default();
-        let legacy_account_initial = if account_registry.is_empty() {
-            poller::codex_account_identity().and_then(|identity| identity.initial())
-        } else {
-            None
-        };
-        let account_initial = account_registry.display_initial(legacy_account_initial);
+        let registry_changed = current_working_identity.as_ref().is_some_and(|identity| {
+            let changed = account_registry.reconcile_working_identity(identity, true);
+            account_registry.set_active_identity(Some(identity));
+            changed
+        });
+        let account_initial = account_registry.display_initial(
+            current_working_identity
+                .as_ref()
+                .and_then(account::AccountIdentity::initial),
+        );
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
@@ -1856,7 +1886,9 @@ pub fn run() {
                 install_channel,
                 widget_style: settings.widget_style,
                 account_registry,
-                legacy_account_initial,
+                current_working_identity,
+                removed_current_account_ids: BTreeSet::new(),
+                account_menu_routes: Vec::new(),
                 account_login: None,
                 account_cleanup: None,
                 account_initial_usage: None,
@@ -1898,6 +1930,10 @@ pub fn run() {
                 drag_start_offset: 0,
                 widget_visible: settings.widget_visible,
             });
+        }
+
+        if registry_changed {
+            save_state_settings();
         }
 
         // Try to embed in taskbar
@@ -2040,7 +2076,11 @@ fn render_layered() {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_registry.display_initial(s.legacy_account_initial),
+                s.account_registry.display_initial(
+                    s.current_working_identity
+                        .as_ref()
+                        .and_then(account::AccountIdentity::initial),
+                ),
             ),
             None => return,
         }
@@ -2471,6 +2511,46 @@ fn poll_error_display_label(error: poller::PollError, language: LanguageId) -> &
     }
 }
 
+fn manual_add_is_available(retained_count: usize, lifecycle_busy: bool) -> bool {
+    !lifecycle_busy && retained_count < account::MAX_RETAINED_ACCOUNTS
+}
+
+fn auto_discovery_is_allowed(
+    account_id: &str,
+    removed_current_account_ids: &BTreeSet<String>,
+) -> bool {
+    !removed_current_account_ids.contains(account_id)
+}
+
+fn reconcile_working_identity(identity: Option<account::AccountIdentity>) -> (bool, bool) {
+    let mut state = lock_state();
+    let Some(state) = state.as_mut() else {
+        return (false, false);
+    };
+    let previous_id = state
+        .current_working_identity
+        .as_ref()
+        .map(|identity| identity.id.as_str());
+    let current_id = identity.as_ref().map(|identity| identity.id.as_str());
+    let identity_changed = previous_id != current_id;
+    if identity_changed {
+        state.removed_current_account_ids.clear();
+    }
+    let allow_retain = identity.as_ref().is_some_and(|identity| {
+        auto_discovery_is_allowed(&identity.id, &state.removed_current_account_ids)
+    });
+    let registry_changed = identity.as_ref().is_some_and(|identity| {
+        state
+            .account_registry
+            .reconcile_working_identity(identity, allow_retain)
+    });
+    state.current_working_identity = identity.clone();
+    state
+        .account_registry
+        .set_active_identity(identity.as_ref());
+    (registry_changed, identity_changed)
+}
+
 fn do_poll(send_hwnd: SendHwnd) {
     let hwnd = send_hwnd.to_hwnd();
     let (show_claude_code, show_codex, show_antigravity) = {
@@ -2480,6 +2560,17 @@ fn do_poll(send_hwnd: SendHwnd) {
             .map(|s| (s.show_claude_code, s.show_codex, s.show_antigravity))
             .unwrap_or((true, false, false))
     };
+
+    let (registry_changed, identity_changed) =
+        reconcile_working_identity(poller::codex_account_identity());
+    if registry_changed {
+        save_state_settings();
+    }
+    if registry_changed || identity_changed {
+        position_at_taskbar();
+        render_layered();
+        sync_tray_icons(hwnd);
+    }
 
     match poller::poll(show_claude_code, show_codex, show_antigravity) {
         Ok(data) => {
@@ -2496,6 +2587,9 @@ fn do_poll(send_hwnd: SendHwnd) {
                 if let Some(codex) = data.codex.as_ref() {
                     s.codex_session_percent = codex.session.used_percentage;
                     s.codex_weekly_percent = codex.weekly.used_percentage;
+                    if let Some(identity) = s.current_working_identity.as_ref() {
+                        s.account_registry.record_usage(&identity.id, codex.clone());
+                    }
                 } else if s.show_codex {
                     s.codex_session_percent = None;
                     s.codex_weekly_percent = None;
@@ -3265,18 +3359,6 @@ unsafe extern "system" fn wnd_proc(
                 }
                 IDM_ACCOUNT_ADD => begin_account_login(hwnd),
                 IDM_ACCOUNT_CANCEL => cancel_account_login(),
-                IDM_ACCOUNT_REAUTH_SLOT1 => {
-                    begin_account_reauth(hwnd, account::MonitorAuthHandle::Slot1)
-                }
-                IDM_ACCOUNT_REAUTH_SLOT2 => {
-                    begin_account_reauth(hwnd, account::MonitorAuthHandle::Slot2)
-                }
-                IDM_ACCOUNT_REMOVE_SLOT1 => {
-                    begin_account_removal(hwnd, account::MonitorAuthHandle::Slot1)
-                }
-                IDM_ACCOUNT_REMOVE_SLOT2 => {
-                    begin_account_removal(hwnd, account::MonitorAuthHandle::Slot2)
-                }
                 IDM_VERSION_ACTION => {
                     let (install_channel, release) = {
                         let state = lock_state();
@@ -3499,7 +3581,7 @@ unsafe extern "system" fn wnd_proc(
                 id if id == tray_icon::IDM_TOGGLE_WIDGET => {
                     toggle_widget_visibility(hwnd);
                 }
-                _ => {}
+                _ => handle_account_menu_command(hwnd, id),
             }
             LRESULT(0)
         }
@@ -3528,6 +3610,80 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+fn account_menu_label(display_name: Option<&str>, initial: Option<char>, active: bool) -> String {
+    let label = display_name
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| initial.map(|initial| initial.to_string()))
+        .unwrap_or_else(|| "Account".to_string());
+    if active {
+        format!("{label} · Active")
+    } else {
+        label
+    }
+}
+
+fn account_menu_entries(state: &AppState) -> Vec<AccountMenuEntry> {
+    let current_id = state
+        .current_working_identity
+        .as_ref()
+        .map(|identity| identity.id.as_str());
+    let mut entries = state
+        .account_registry
+        .accounts()
+        .iter()
+        .map(|account| {
+            let active = Some(account.id.as_str()) == current_id;
+            AccountMenuEntry {
+                account_id: account.id.clone(),
+                label: account_menu_label(account.display_name.as_deref(), account.initial, active),
+                retained: true,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(identity) = state.current_working_identity.as_ref() {
+        let is_retained = state
+            .account_registry
+            .accounts()
+            .iter()
+            .any(|account| account.id == identity.id);
+        if !is_retained {
+            entries.push(AccountMenuEntry {
+                account_id: identity.id.clone(),
+                label: account_menu_label(
+                    identity.display_name.as_deref(),
+                    identity.initial(),
+                    true,
+                ),
+                retained: false,
+            });
+        }
+    }
+
+    entries
+}
+
+fn handle_account_menu_command(hwnd: HWND, command_id: u16) {
+    let action = {
+        let state = lock_state();
+        state.as_ref().and_then(|state| {
+            state
+                .account_menu_routes
+                .iter()
+                .find(|route| route.command_id == command_id)
+                .map(|route| route.action.clone())
+        })
+    };
+    match action {
+        Some(AccountMenuAction::Reauthenticate(account_id)) => {
+            begin_account_reauth(hwnd, account_id)
+        }
+        Some(AccountMenuAction::Remove(account_id)) => begin_account_removal(hwnd, account_id),
+        None => {}
     }
 }
 
@@ -3572,17 +3728,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_weekly_window,
                     s.widget_style,
                     s.alert_threshold_percent,
-                    s.account_registry
-                        .accounts()
-                        .iter()
-                        .map(|account| {
-                            (
-                                account.initial,
-                                account.auth_handle,
-                                account.connection_state,
-                            )
-                        })
-                        .collect(),
+                    account_menu_entries(s),
                     s.account_login.is_some(),
                     s.account_cleanup.is_some(),
                     s.account_initial_usage.is_some(),
@@ -3652,10 +3798,19 @@ fn show_context_menu(hwnd: HWND) {
             PCWSTR::from_raw(freq_label.as_ptr()),
         );
 
-        // Monitored account lifecycle submenu. Account entries expose only
-        // the initial and connection state; identity/credential material stays
-        // in the account domain and its Codex-owned auth handle.
+        // Monitored account lifecycle submenu. Each account owns its actions;
+        // command routing is generated from the retained collection at menu
+        // construction time, never from account positions or fixed slots.
         let accounts_menu = CreatePopupMenu().unwrap();
+        let account_header = native_interop::wide_str("Account");
+        let _ = AppendMenuW(
+            accounts_menu,
+            MF_GRAYED,
+            0,
+            PCWSTR::from_raw(account_header.as_ptr()),
+        );
+        let retained_count = account_items.iter().filter(|entry| entry.retained).count();
+        let mut account_routes = Vec::new();
         if account_items.is_empty() {
             let label = native_interop::wide_str("No monitored accounts");
             let _ = AppendMenuW(
@@ -3665,85 +3820,81 @@ fn show_context_menu(hwnd: HWND) {
                 PCWSTR::from_raw(label.as_ptr()),
             );
         } else {
-            for (initial, _handle, connection_state) in &account_items {
-                let initial = initial
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "?".into());
-                let label = native_interop::wide_str(&format!(
-                    "{initial}   {}",
-                    account_connection_state_label(*connection_state)
-                ));
-                let _ = AppendMenuW(
-                    accounts_menu,
-                    MF_GRAYED,
-                    0,
-                    PCWSTR::from_raw(label.as_ptr()),
-                );
-            }
-        }
-
-        let manage_menu = CreatePopupMenu().unwrap();
-        if account_items.is_empty() {
-            let label = native_interop::wide_str("No accounts to manage");
-            let _ = AppendMenuW(manage_menu, MF_GRAYED, 0, PCWSTR::from_raw(label.as_ptr()));
-        } else {
-            for (initial, handle, _connection_state) in &account_items {
-                let initial = initial
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "?".into());
-                let reauth_label = native_interop::wide_str(&format!("Re-authenticate {initial}"));
-                let reauth_flags = if account_login_active
-                    || account_cleanup_active
-                    || account_initial_usage_active
+            for entry in &account_items {
+                let submenu = CreatePopupMenu().unwrap();
+                let reauth_id = IDM_ACCOUNT_ACTION_BASE + account_routes.len() as u16;
+                account_routes.push(AccountMenuRoute {
+                    command_id: reauth_id,
+                    action: AccountMenuAction::Reauthenticate(entry.account_id.clone()),
+                });
+                let reauth_label = native_interop::wide_str("Re-authenticate");
+                let lifecycle_busy =
+                    account_login_active || account_cleanup_active || account_initial_usage_active;
+                let reauth_flags = if lifecycle_busy
+                    || (!entry.retained && retained_count >= account::MAX_RETAINED_ACCOUNTS)
                 {
                     MF_GRAYED
                 } else {
                     MENU_ITEM_FLAGS(0)
                 };
                 let _ = AppendMenuW(
-                    manage_menu,
+                    submenu,
                     reauth_flags,
-                    account_reauth_menu_id(*handle) as usize,
+                    reauth_id as usize,
                     PCWSTR::from_raw(reauth_label.as_ptr()),
                 );
-                let remove_label = native_interop::wide_str(&format!("Remove {initial}"));
-                let remove_flags = if account_cleanup_active {
+
+                let remove_id = IDM_ACCOUNT_ACTION_BASE + account_routes.len() as u16;
+                account_routes.push(AccountMenuRoute {
+                    command_id: remove_id,
+                    action: AccountMenuAction::Remove(entry.account_id.clone()),
+                });
+                let remove_label = native_interop::wide_str("Remove from monitor");
+                let remove_flags = if lifecycle_busy || !entry.retained {
                     MF_GRAYED
                 } else {
                     MENU_ITEM_FLAGS(0)
                 };
                 let _ = AppendMenuW(
-                    manage_menu,
+                    submenu,
                     remove_flags,
-                    account_remove_menu_id(*handle) as usize,
+                    remove_id as usize,
                     PCWSTR::from_raw(remove_label.as_ptr()),
+                );
+
+                let label = native_interop::wide_str(&entry.label);
+                let _ = AppendMenuW(
+                    accounts_menu,
+                    MF_POPUP,
+                    submenu.0 as usize,
+                    PCWSTR::from_raw(label.as_ptr()),
                 );
             }
         }
 
-        let manage_label = native_interop::wide_str("Manage accounts");
-        let _ = AppendMenuW(
-            accounts_menu,
-            MF_POPUP,
-            manage_menu.0 as usize,
-            PCWSTR::from_raw(manage_label.as_ptr()),
-        );
         let _ = AppendMenuW(accounts_menu, MF_SEPARATOR, 0, PCWSTR::null());
 
+        let manage_header = native_interop::wide_str("Manage account");
+        let _ = AppendMenuW(
+            accounts_menu,
+            MF_GRAYED,
+            0,
+            PCWSTR::from_raw(manage_header.as_ptr()),
+        );
         let add_disabled = account_login_active
             || account_cleanup_active
             || account_initial_usage_active
-            || account_items.len() >= account::MAX_MONITORED_ACCOUNTS;
-        let add_label = if account_items.len() >= account::MAX_MONITORED_ACCOUNTS {
-            "Add account... (maximum two)"
+            || retained_count >= account::MAX_RETAINED_ACCOUNTS;
+        let add_label = if retained_count >= account::MAX_RETAINED_ACCOUNTS {
+            "Add monitor account... (maximum four)"
         } else if account_login_active {
-            "Add account... (login in progress)"
+            "Add monitor account... (login in progress)"
         } else if account_cleanup_active {
-            "Add account... (operation in progress)"
+            "Add monitor account... (operation in progress)"
         } else if account_initial_usage_active {
-            "Add account... (usage read in progress)"
+            "Add monitor account... (usage read in progress)"
         } else {
-            "Add account..."
+            "Add monitor account..."
         };
         let add_label = native_interop::wide_str(add_label);
         let add_flags = if add_disabled {
@@ -3765,6 +3916,12 @@ fn show_context_menu(hwnd: HWND) {
                 IDM_ACCOUNT_CANCEL as usize,
                 PCWSTR::from_raw(cancel_label.as_ptr()),
             );
+        }
+        {
+            let mut state = lock_state();
+            if let Some(state) = state.as_mut() {
+                state.account_menu_routes = account_routes;
+            }
         }
         let accounts_label = native_interop::wide_str("Accounts");
         let _ = AppendMenuW(
@@ -4095,6 +4252,10 @@ fn show_context_menu(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
         let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
+        let mut state = lock_state();
+        if let Some(state) = state.as_mut() {
+            state.account_menu_routes.clear();
+        }
     }
 }
 
@@ -4114,28 +4275,6 @@ enum AccountLifecycleEvent {
     },
 }
 
-fn account_connection_state_label(state: account::ConnectionState) -> &'static str {
-    match state {
-        account::ConnectionState::Connected => "Connected",
-        account::ConnectionState::ReauthRequired => "Re-auth required",
-        account::ConnectionState::Unavailable => "Unavailable",
-    }
-}
-
-fn account_reauth_menu_id(handle: account::MonitorAuthHandle) -> u16 {
-    match handle {
-        account::MonitorAuthHandle::Slot1 => IDM_ACCOUNT_REAUTH_SLOT1,
-        account::MonitorAuthHandle::Slot2 => IDM_ACCOUNT_REAUTH_SLOT2,
-    }
-}
-
-fn account_remove_menu_id(handle: account::MonitorAuthHandle) -> u16 {
-    match handle {
-        account::MonitorAuthHandle::Slot1 => IDM_ACCOUNT_REMOVE_SLOT1,
-        account::MonitorAuthHandle::Slot2 => IDM_ACCOUNT_REMOVE_SLOT2,
-    }
-}
-
 fn begin_account_login(hwnd: HWND) {
     let handle = {
         let state = lock_state();
@@ -4148,14 +4287,21 @@ fn begin_account_login(hwnd: HWND) {
         {
             return;
         }
-        state.account_registry.available_auth_handle()
+        let lifecycle_busy = state.account_login.is_some()
+            || state.account_cleanup.is_some()
+            || state.account_initial_usage.is_some();
+        if !manual_add_is_available(state.account_registry.len(), lifecycle_busy) {
+            None
+        } else {
+            state.account_registry.allocate_auth_handle()
+        }
     };
 
     let Some(handle) = handle else {
         show_info_message(
             hwnd,
             "Accounts",
-            "Maximum two monitored accounts are supported.",
+            "Maximum four retained accounts are supported.",
         );
         return;
     };
@@ -4171,25 +4317,15 @@ fn begin_account_login(hwnd: HWND) {
         {
             return;
         }
-        let existing_identity_ids = state
-            .account_registry
-            .accounts()
-            .iter()
-            .map(|account| account.id.clone())
-            .collect();
-        state.account_login = Some(account::LoginOperation::start(
-            handle,
-            None,
-            existing_identity_ids,
-        ));
+        state.account_login = Some(account::LoginOperation::start(handle, None));
     }
     unsafe {
         SetTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE, 250, None);
     }
 }
 
-fn begin_account_reauth(hwnd: HWND, handle: account::MonitorAuthHandle) {
-    let account_id = {
+fn begin_account_reauth(hwnd: HWND, account_id: String) {
+    let (handle, can_retain_current_only) = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
             return;
@@ -4200,15 +4336,33 @@ fn begin_account_reauth(hwnd: HWND, handle: account::MonitorAuthHandle) {
         {
             return;
         }
-        state
+        let existing = state
             .account_registry
-            .account_by_handle(handle)
-            .map(|account| account.id.clone())
+            .account_by_id(&account_id)
+            .and_then(|account| account.auth_handle);
+        (
+            existing.or_else(|| state.account_registry.allocate_auth_handle()),
+            existing.is_some() || state.account_registry.len() < account::MAX_RETAINED_ACCOUNTS,
+        )
     };
 
-    let Some(account_id) = account_id else {
+    if !can_retain_current_only {
+        show_info_message(
+            hwnd,
+            "Accounts",
+            "Maximum four retained accounts are supported.",
+        );
+        return;
+    }
+    let Some(handle) = handle else {
+        show_info_message(
+            hwnd,
+            "Accounts",
+            "No monitor credential owner is available.",
+        );
         return;
     };
+
     {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {
@@ -4220,19 +4374,33 @@ fn begin_account_reauth(hwnd: HWND, handle: account::MonitorAuthHandle) {
         {
             return;
         }
-        state.account_login = Some(account::LoginOperation::start(
-            handle,
-            Some(account_id),
-            Vec::new(),
-        ));
+        state.account_login = Some(account::LoginOperation::start(handle, Some(account_id)));
     }
     unsafe {
         SetTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE, 250, None);
     }
 }
 
-fn begin_account_removal(hwnd: HWND, handle: account::MonitorAuthHandle) {
-    let account_id = {
+fn remove_retained_account(account_id: &str) -> bool {
+    let mut state = lock_state();
+    let Some(state) = state.as_mut() else {
+        return false;
+    };
+    let is_current = state
+        .current_working_identity
+        .as_ref()
+        .is_some_and(|identity| identity.id == account_id);
+    let removed = state.account_registry.remove_by_id(account_id).is_some();
+    if removed && is_current {
+        state
+            .removed_current_account_ids
+            .insert(account_id.to_string());
+    }
+    removed
+}
+
+fn begin_account_removal(hwnd: HWND, account_id: String) {
+    let handle = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
             return;
@@ -4245,13 +4413,21 @@ fn begin_account_removal(hwnd: HWND, handle: account::MonitorAuthHandle) {
         }
         state
             .account_registry
-            .account_by_handle(handle)
-            .map(|account| account.id.clone())
+            .account_by_id(&account_id)
+            .and_then(|account| account.auth_handle)
     };
 
-    let Some(account_id) = account_id else {
+    if handle.is_none() {
+        let removed = remove_retained_account(account_id.as_str());
+        if removed {
+            save_state_settings();
+            position_at_taskbar();
+            render_layered();
+            sync_tray_icons(hwnd);
+        }
         return;
-    };
+    }
+    let handle = handle.expect("checked above");
     {
         let mut state = lock_state();
         let Some(state) = state.as_mut() else {
@@ -4415,15 +4591,31 @@ fn poll_account_lifecycle(hwnd: HWND) {
             result: Ok(identity),
         } => {
             if expected_identity.is_some() {
-                let updated = {
+                let registered = {
                     let mut state = lock_state();
                     state.as_mut().is_some_and(|state| {
-                        state
-                            .account_registry
-                            .update_identity(&identity.id, &identity)
+                        if state.account_registry.account_by_id(&identity.id).is_some() {
+                            state
+                                .account_registry
+                                .update_identity(&identity.id, &identity)
+                                && state
+                                    .account_registry
+                                    .update_auth_handle(&identity.id, Some(handle))
+                                    .is_ok()
+                        } else if state.account_registry.len() < account::MAX_RETAINED_ACCOUNTS {
+                            state
+                                .account_registry
+                                .try_add(account::MonitoredAccount::from_identity(
+                                    &identity,
+                                    Some(handle),
+                                ))
+                                .is_ok()
+                        } else {
+                            false
+                        }
                     })
                 };
-                if updated {
+                if registered {
                     match commit_pending_login() {
                         Ok(()) => {
                             let account_id = identity.id.clone();
@@ -4452,23 +4644,26 @@ fn poll_account_lifecycle(hwnd: HWND) {
                     state.as_mut().map(|state| {
                         state
                             .account_registry
-                            .try_add(account::MonitoredAccount::from_identity(&identity, handle))
+                            .reconcile_manual_identity(&identity, handle)
                     })
                 };
                 match result {
-                    Some(Ok(())) => match commit_pending_login() {
-                        Ok(()) => {
-                            save_state_settings();
-                            position_at_taskbar();
-                            render_layered();
-                            sync_tray_icons(hwnd);
-                            begin_initial_usage_read(hwnd, account_id, handle);
+                    Some(Ok(account::ManualIdentityResolution::Added))
+                    | Some(Ok(account::ManualIdentityResolution::Attached)) => {
+                        match commit_pending_login() {
+                            Ok(()) => {
+                                save_state_settings();
+                                position_at_taskbar();
+                                render_layered();
+                                sync_tray_icons(hwnd);
+                                begin_initial_usage_read(hwnd, account_id, handle);
+                            }
+                            Err(error) => {
+                                show_error_message(hwnd, "Accounts", error.user_message());
+                            }
                         }
-                        Err(error) => {
-                            show_error_message(hwnd, "Accounts", error.user_message());
-                        }
-                    },
-                    Some(Err(account::RegistryError::DuplicateIdentity)) => {
+                    }
+                    Some(Ok(account::ManualIdentityResolution::AlreadyMonitored)) => {
                         match rollback_pending_login() {
                             Ok(()) => show_info_message(
                                 hwnd,
@@ -4480,53 +4675,49 @@ fn poll_account_lifecycle(hwnd: HWND) {
                             }
                         }
                     }
-                    Some(Err(account::RegistryError::DuplicateAuthOwner))
-                    | Some(Err(account::RegistryError::CapacityReached)) => {
-                        match rollback_pending_login() {
-                            Ok(()) => show_info_message(
-                                hwnd,
-                                "Accounts",
-                                "Maximum two monitored accounts are supported.",
-                            ),
-                            Err(error) => {
-                                show_error_message(hwnd, "Accounts", error.user_message())
-                            }
+                    Some(Err(error)) => match rollback_pending_login() {
+                        Ok(()) => {
+                            let message = match error {
+                                account::RegistryError::DuplicateIdentity => {
+                                    "This account is already monitored."
+                                }
+                                account::RegistryError::DuplicateAuthOwner => {
+                                    "The monitor credential owner is already in use."
+                                }
+                                account::RegistryError::CapacityReached => {
+                                    "Maximum four retained accounts are supported."
+                                }
+                                account::RegistryError::EmptyIdentity => {
+                                    "The account identity could not be read."
+                                }
+                            };
+                            show_error_message(hwnd, "Accounts", message);
                         }
-                    }
-                    Some(Err(account::RegistryError::EmptyIdentity)) | None => {
-                        match rollback_pending_login() {
-                            Ok(()) => show_error_message(
-                                hwnd,
-                                "Accounts",
-                                "The account identity could not be read.",
-                            ),
-                            Err(error) => {
-                                show_error_message(hwnd, "Accounts", error.user_message())
-                            }
-                        }
-                    }
+                        Err(error) => show_error_message(hwnd, "Accounts", error.user_message()),
+                    },
+                    None => match rollback_pending_login() {
+                        Ok(()) => show_error_message(
+                            hwnd,
+                            "Accounts",
+                            "The account identity could not be read.",
+                        ),
+                        Err(error) => show_error_message(hwnd, "Accounts", error.user_message()),
+                    },
                 }
             }
         }
         AccountLifecycleEvent::Login {
-            handle,
+            handle: _,
             result: Err(error),
             ..
         } => {
-            let _ = handle;
             show_error_message(hwnd, "Accounts", error.user_message());
         }
         AccountLifecycleEvent::Cleanup {
             account_id,
             result: Ok(()),
         } => {
-            let removed = {
-                let mut state = lock_state();
-                state
-                    .as_mut()
-                    .and_then(|state| state.account_registry.remove_by_id(&account_id))
-                    .is_some()
-            };
+            let removed = remove_retained_account(&account_id);
             if removed {
                 save_state_settings();
                 position_at_taskbar();
@@ -4623,7 +4814,11 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
-                s.account_registry.display_initial(s.legacy_account_initial),
+                s.account_registry.display_initial(
+                    s.current_working_identity
+                        .as_ref()
+                        .and_then(account::AccountIdentity::initial),
+                ),
             ),
             None => return,
         }
@@ -5284,6 +5479,35 @@ mod tests {
         assert!(circle_sweep_degrees(76.0) > circle_sweep_degrees(44.0));
         assert_eq!(circle_sweep_degrees(0.0), 0.0);
         assert_eq!(circle_sweep_degrees(100.0), 360.0);
+    }
+
+    #[test]
+    fn account_menu_prefers_display_name_and_marks_runtime_active_role() {
+        assert_eq!(
+            account_menu_label(Some("Sidik"), Some('S'), true),
+            "Sidik · Active"
+        );
+        assert_eq!(account_menu_label(None, Some('N'), false), "N");
+    }
+
+    #[test]
+    fn fifth_manual_add_is_rejected_before_login_preflight() {
+        assert!(!manual_add_is_available(
+            account::MAX_RETAINED_ACCOUNTS,
+            false
+        ));
+        assert!(!manual_add_is_available(3, true));
+        assert!(manual_add_is_available(3, false));
+    }
+
+    #[test]
+    fn removed_current_identity_stays_current_only_until_identity_changes() {
+        let mut removed = BTreeSet::new();
+        removed.insert("account-a".to_string());
+        assert!(!auto_discovery_is_allowed("account-a", &removed));
+        assert!(auto_discovery_is_allowed("account-b", &removed));
+        removed.clear();
+        assert!(auto_discovery_is_allowed("account-a", &removed));
     }
 
     #[test]

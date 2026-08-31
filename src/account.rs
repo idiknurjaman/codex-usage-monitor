@@ -1,6 +1,9 @@
+use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
+use serde::{Deserializer, Serializer};
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::fmt::Formatter;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -17,30 +20,29 @@ use codex_login::{
 
 use crate::models::UsageData;
 
-pub const MAX_MONITORED_ACCOUNTS: usize = 2;
+pub const MAX_RETAINED_ACCOUNTS: usize = 4;
 
 /// Typed reference to one approved monitor-owned credential namespace.
 /// The filesystem root is resolved by the auth owner at runtime and is never
 /// serialized into settings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MonitorAuthHandle {
-    #[serde(rename = "slot-1")]
-    Slot1,
-    #[serde(rename = "slot-2")]
-    Slot2,
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MonitorAuthHandle(u32);
 
-#[allow(dead_code)] // Namespace resolution is consumed by the auth lifecycle phase.
 impl MonitorAuthHandle {
-    pub const fn namespace_key(self) -> &'static str {
-        match self {
-            Self::Slot1 => "monitor-auth/slot-1",
-            Self::Slot2 => "monitor-auth/slot-2",
+    pub const fn new(index: u32) -> Option<Self> {
+        if index == 0 {
+            None
+        } else {
+            Some(Self(index))
         }
     }
 
-    pub const fn all() -> [Self; MAX_MONITORED_ACCOUNTS] {
-        [Self::Slot1, Self::Slot2]
+    pub const fn index(self) -> u32 {
+        self.0
+    }
+
+    pub fn namespace_key(self) -> String {
+        format!("monitor-auth/owner-{}", self.index())
     }
 
     /// Resolve the clean production owner root at runtime. This path is never
@@ -53,6 +55,58 @@ impl MonitorAuthHandle {
     }
 }
 
+impl Serialize for MonitorAuthHandle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("owner-{}", self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for MonitorAuthHandle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MonitorAuthHandleVisitor;
+
+        impl<'de> Visitor<'de> for MonitorAuthHandleVisitor {
+            type Value = MonitorAuthHandle;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a positive monitor auth owner index")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let index =
+                    u32::try_from(value).map_err(|_| E::custom("owner index is too large"))?;
+                MonitorAuthHandle::new(index)
+                    .ok_or_else(|| E::custom("owner index must be positive"))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let index = value
+                    .strip_prefix("owner-")
+                    .or_else(|| value.strip_prefix("slot-"))
+                    .ok_or_else(|| E::custom("invalid monitor auth owner key"))?
+                    .parse::<u32>()
+                    .map_err(|_| E::custom("invalid monitor auth owner index"))?;
+                MonitorAuthHandle::new(index)
+                    .ok_or_else(|| E::custom("owner index must be positive"))
+            }
+        }
+
+        deserializer.deserialize_any(MonitorAuthHandleVisitor)
+    }
+}
+
 /// Non-secret metadata persisted for one monitored account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitoredAccountMetadata {
@@ -61,8 +115,11 @@ pub struct MonitoredAccountMetadata {
     pub initial: Option<char>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Typed reference to a Codex-owned credential owner. Never a token/path.
-    pub auth_handle: MonitorAuthHandle,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Optional typed reference to a Codex-owned credential owner. Never a token/path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_handle: Option<MonitorAuthHandle>,
 }
 
 fn default_enabled() -> bool {
@@ -137,8 +194,9 @@ pub fn resolve_credential_transaction(
 pub struct MonitoredAccount {
     pub id: String,
     pub initial: Option<char>,
+    pub display_name: Option<String>,
     pub enabled: bool,
-    pub auth_handle: MonitorAuthHandle,
+    pub auth_handle: Option<MonitorAuthHandle>,
     pub connection_state: ConnectionState,
     pub usage: Option<UsageData>,
     pub last_success_at: Option<SystemTime>,
@@ -151,19 +209,28 @@ impl MonitoredAccount {
         Self {
             id: metadata.id,
             initial: metadata.initial,
+            display_name: metadata.display_name,
             enabled: metadata.enabled,
             auth_handle: metadata.auth_handle,
-            connection_state: ConnectionState::Unavailable,
+            connection_state: if metadata.auth_handle.is_some() {
+                ConnectionState::Unavailable
+            } else {
+                ConnectionState::ReauthRequired
+            },
             usage: None,
             last_success_at: None,
             last_error: None,
         }
     }
 
-    pub fn from_identity(identity: &AccountIdentity, auth_handle: MonitorAuthHandle) -> Self {
+    pub fn from_identity(
+        identity: &AccountIdentity,
+        auth_handle: Option<MonitorAuthHandle>,
+    ) -> Self {
         Self {
             id: identity.id.clone(),
             initial: identity.initial(),
+            display_name: identity.display_name.clone(),
             enabled: true,
             auth_handle,
             connection_state: ConnectionState::Connected,
@@ -177,6 +244,7 @@ impl MonitoredAccount {
         MonitoredAccountMetadata {
             id: self.id.clone(),
             initial: self.initial,
+            display_name: self.display_name.clone(),
             enabled: self.enabled,
             auth_handle: self.auth_handle,
         }
@@ -191,11 +259,18 @@ pub enum RegistryError {
     DuplicateAuthOwner,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManualIdentityResolution {
+    Added,
+    Attached,
+    AlreadyMonitored,
+}
+
 impl fmt::Display for RegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::EmptyIdentity => "account identity must not be empty",
-            Self::CapacityReached => "maximum monitored account count is two",
+            Self::CapacityReached => "maximum retained account count is four",
             Self::DuplicateIdentity => "account identity is already registered",
             Self::DuplicateAuthOwner => "monitor auth owner is already registered",
         })
@@ -204,7 +279,7 @@ impl fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-/// Stable registry with max-two enforcement, identity-based duplicates, and
+/// Stable registry with policy-bounded retention, identity-based duplicates, and
 /// insertion order as the persisted display order.
 #[derive(Clone, Debug, Default)]
 pub struct AccountRegistry {
@@ -249,18 +324,26 @@ impl AccountRegistry {
             .and_then(|account| account.initial)
     }
 
-    pub fn available_auth_handle(&self) -> Option<MonitorAuthHandle> {
-        MonitorAuthHandle::all().into_iter().find(|handle| {
+    pub fn allocate_auth_handle(&self) -> Option<MonitorAuthHandle> {
+        (1..=self.accounts.len() as u32 + 1).find_map(|index| {
+            let handle = MonitorAuthHandle::new(index)?;
             self.accounts
                 .iter()
-                .all(|account| account.auth_handle != *handle)
+                .all(|account| account.auth_handle != Some(handle))
+                .then_some(handle)
         })
+    }
+
+    pub fn account_by_id(&self, account_id: &str) -> Option<&MonitoredAccount> {
+        self.accounts
+            .iter()
+            .find(|account| account.id == account_id)
     }
 
     pub fn account_by_handle(&self, handle: MonitorAuthHandle) -> Option<&MonitoredAccount> {
         self.accounts
             .iter()
-            .find(|account| account.auth_handle == handle)
+            .find(|account| account.auth_handle == Some(handle))
     }
 
     pub fn update_identity(&mut self, account_id: &str, identity: &AccountIdentity) -> bool {
@@ -272,7 +355,68 @@ impl AccountRegistry {
             return false;
         };
         account.initial = identity.initial();
+        account.display_name = identity.display_name.clone();
         true
+    }
+
+    pub fn reconcile_working_identity(
+        &mut self,
+        identity: &AccountIdentity,
+        allow_retain: bool,
+    ) -> bool {
+        if let Some(account) = self.account_by_id(&identity.id) {
+            let changed = account.initial != identity.initial()
+                || account.display_name != identity.display_name;
+            if changed {
+                self.update_identity(&identity.id, identity);
+            }
+            return changed;
+        }
+        if !allow_retain || self.accounts.len() >= MAX_RETAINED_ACCOUNTS {
+            return false;
+        }
+        self.try_add(MonitoredAccount::from_identity(identity, None))
+            .is_ok()
+    }
+
+    pub fn set_active_identity(&mut self, active_identity: Option<&AccountIdentity>) {
+        let active_id = active_identity.map(|identity| identity.id.as_str());
+        for account in &mut self.accounts {
+            if Some(account.id.as_str()) == active_id {
+                account.initial = active_identity.and_then(AccountIdentity::initial);
+                account.display_name =
+                    active_identity.and_then(|identity| identity.display_name.clone());
+            } else if account.auth_handle.is_none() {
+                account.connection_state = ConnectionState::ReauthRequired;
+            }
+        }
+    }
+
+    pub fn is_active_id(&self, account_id: &str, active_id: Option<&str>) -> bool {
+        active_id == Some(account_id)
+    }
+
+    pub fn reconcile_manual_identity(
+        &mut self,
+        identity: &AccountIdentity,
+        auth_handle: MonitorAuthHandle,
+    ) -> Result<ManualIdentityResolution, RegistryError> {
+        if self.account_by_id(&identity.id).is_some() {
+            let has_owner = self
+                .account_by_id(&identity.id)
+                .and_then(|account| account.auth_handle)
+                .is_some();
+            if has_owner {
+                self.update_identity(&identity.id, identity);
+                return Ok(ManualIdentityResolution::AlreadyMonitored);
+            }
+            self.update_identity(&identity.id, identity);
+            self.update_auth_handle(&identity.id, Some(auth_handle))?;
+            return Ok(ManualIdentityResolution::Attached);
+        }
+
+        self.try_add(MonitoredAccount::from_identity(identity, Some(auth_handle)))?;
+        Ok(ManualIdentityResolution::Added)
     }
 
     pub fn record_usage(&mut self, account_id: &str, usage: UsageData) -> bool {
@@ -306,13 +450,13 @@ impl AccountRegistry {
     pub fn update_auth_handle(
         &mut self,
         account_id: &str,
-        new_handle: MonitorAuthHandle,
+        new_handle: Option<MonitorAuthHandle>,
     ) -> Result<(), RegistryError> {
-        if self
-            .accounts
-            .iter()
-            .any(|account| account.id != account_id && account.auth_handle == new_handle)
-        {
+        if new_handle.is_some_and(|new_handle| {
+            self.accounts
+                .iter()
+                .any(|account| account.id != account_id && account.auth_handle == Some(new_handle))
+        }) {
             return Err(RegistryError::DuplicateAuthOwner);
         }
         let account = self
@@ -345,14 +489,14 @@ impl AccountRegistry {
         {
             return Err(RegistryError::DuplicateIdentity);
         }
-        if self
-            .accounts
-            .iter()
-            .any(|existing| existing.auth_handle == account.auth_handle)
-        {
+        if account.auth_handle.is_some_and(|auth_handle| {
+            self.accounts
+                .iter()
+                .any(|existing| existing.auth_handle == Some(auth_handle))
+        }) {
             return Err(RegistryError::DuplicateAuthOwner);
         }
-        if self.accounts.len() >= MAX_MONITORED_ACCOUNTS {
+        if self.accounts.len() >= MAX_RETAINED_ACCOUNTS {
             return Err(RegistryError::CapacityReached);
         }
         self.accounts.push(account);
@@ -365,8 +509,8 @@ impl AccountRegistry {
     }
 }
 
-/// Runtime identity projection. Persistence requires an explicit auth handle;
-/// identity itself never manufactures credential ownership.
+/// Runtime identity projection. An identity never manufactures credential
+/// ownership; the registry may retain it before an independent owner exists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountIdentity {
     pub id: String,
@@ -427,7 +571,6 @@ pub enum LoginError {
     NotAuthenticated,
     IdentityUnavailable,
     IdentityChanged,
-    DuplicateAccount,
     RollbackFailed,
     InitialUsageFailed,
 }
@@ -445,7 +588,6 @@ impl LoginError {
             Self::IdentityChanged => {
                 "Re-authentication resolved to a different account; the existing account was kept."
             }
-            Self::DuplicateAccount => "This account is already monitored.",
             Self::RollbackFailed => {
                 "Account login failed and the monitor credential could not be rolled back."
             }
@@ -481,11 +623,7 @@ pub struct LoginOperation {
 }
 
 impl LoginOperation {
-    pub fn start(
-        handle: MonitorAuthHandle,
-        expected_identity: Option<String>,
-        existing_identity_ids: Vec<String>,
-    ) -> Self {
+    pub fn start(handle: MonitorAuthHandle, expected_identity: Option<String>) -> Self {
         let cancel_requested = Arc::new(AtomicBool::new(false));
         let cancel_handle = Arc::new(Mutex::new(None));
         let snapshot = Arc::new(Mutex::new(None));
@@ -498,7 +636,6 @@ impl LoginOperation {
             let result = run_login(
                 handle,
                 worker_expected_identity,
-                existing_identity_ids,
                 worker_cancel_requested,
                 worker_cancel_handle,
                 worker_snapshot,
@@ -679,7 +816,6 @@ fn capture_reauth_snapshot(
 fn run_login(
     handle: MonitorAuthHandle,
     expected_identity: Option<String>,
-    existing_identity_ids: Vec<String>,
     cancel_requested: Arc<AtomicBool>,
     cancel_handle: Arc<Mutex<Option<codex_login::ShutdownHandle>>>,
     snapshot_slot: Arc<Mutex<Option<CredentialSnapshot>>>,
@@ -831,16 +967,6 @@ fn run_login(
                     LoginError::IdentityChanged,
                 );
             }
-        } else if existing_identity_ids
-            .iter()
-            .any(|existing_id| existing_id == &identity.id)
-        {
-            return rollback_login_error(
-                &storage_path,
-                &previous_snapshot,
-                &snapshot_slot,
-                LoginError::DuplicateAccount,
-            );
         }
 
         Ok(identity)
@@ -1011,7 +1137,11 @@ mod tests {
         display_name: Option<&str>,
         auth_handle: MonitorAuthHandle,
     ) -> MonitoredAccount {
-        MonitoredAccount::from_identity(&identity(id, display_name), auth_handle)
+        MonitoredAccount::from_identity(&identity(id, display_name), Some(auth_handle))
+    }
+
+    fn handle(index: u32) -> MonitorAuthHandle {
+        MonitorAuthHandle::new(index).unwrap()
     }
 
     #[test]
@@ -1039,40 +1169,24 @@ mod tests {
     }
 
     #[test]
-    fn registry_enforces_two_accounts_and_duplicate_identity() {
+    fn registry_enforces_retention_and_duplicate_identity() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Sam"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Sam"), handle(1)))
             .unwrap();
         assert_eq!(
-            registry.try_add(monitored(
-                "account-a",
-                Some("Alex"),
-                MonitorAuthHandle::Slot2
-            )),
+            registry.try_add(monitored("account-a", Some("Alex"), handle(2))),
             Err(RegistryError::DuplicateIdentity)
         );
 
         registry
-            .try_add(monitored(
-                "account-b",
-                Some("Nina"),
-                MonitorAuthHandle::Slot2,
-            ))
+            .try_add(monitored("account-b", Some("Nina"), handle(2)))
             .unwrap();
         assert_eq!(
-            registry.try_add(monitored(
-                "account-c",
-                Some("Ray"),
-                MonitorAuthHandle::Slot1
-            )),
+            registry.try_add(monitored("account-c", Some("Ray"), handle(1))),
             Err(RegistryError::DuplicateAuthOwner)
         );
-        assert_eq!(registry.len(), MAX_MONITORED_ACCOUNTS);
+        assert_eq!(registry.len(), 2);
         assert!(!registry.is_empty());
         assert!(registry.remove_by_id("account-a").is_some());
         assert_eq!(registry.len(), 1);
@@ -1082,18 +1196,10 @@ mod tests {
     fn same_initial_accounts_are_valid_and_order_is_persisted() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Sam"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Sam"), handle(1)))
             .unwrap();
         registry
-            .try_add(monitored(
-                "account-b",
-                Some("Sidik"),
-                MonitorAuthHandle::Slot2,
-            ))
+            .try_add(monitored("account-b", Some("Sidik"), handle(2)))
             .unwrap();
 
         assert_eq!(registry.accounts()[0].initial, Some('S'));
@@ -1104,54 +1210,38 @@ mod tests {
     }
 
     #[test]
-    fn distinct_auth_owners_allow_two_accounts() {
+    fn distinct_auth_owners_allow_multiple_accounts() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Alice"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Alice"), handle(1)))
             .unwrap();
         registry
-            .try_add(monitored(
-                "account-b",
-                Some("Bob"),
-                MonitorAuthHandle::Slot2,
-            ))
+            .try_add(monitored("account-b", Some("Bob"), handle(2)))
             .unwrap();
 
         assert_eq!(registry.len(), 2);
-        assert_eq!(registry.accounts()[0].auth_handle, MonitorAuthHandle::Slot1);
-        assert_eq!(registry.accounts()[1].auth_handle, MonitorAuthHandle::Slot2);
+        assert_eq!(registry.accounts()[0].auth_handle, Some(handle(1)));
+        assert_eq!(registry.accounts()[1].auth_handle, Some(handle(2)));
     }
 
     #[test]
     fn reauthentication_updates_display_identity_without_replacing_owner() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Alice"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Alice"), handle(1)))
             .unwrap();
 
         let resolved_identity = identity("account-a", Some("Alicia"));
         assert!(registry.update_identity("account-a", &resolved_identity));
         assert_eq!(registry.accounts()[0].initial, Some('A'));
-        assert_eq!(registry.accounts()[0].auth_handle, MonitorAuthHandle::Slot1);
+        assert_eq!(registry.accounts()[0].auth_handle, Some(handle(1)));
     }
 
     #[test]
     fn persisted_metadata_contains_no_credential_material() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Sam"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Sam"), handle(1)))
             .unwrap();
         let serialized = serde_json::to_string(&registry.metadata()).unwrap();
         assert!(!serialized.contains("access_token"));
@@ -1166,23 +1256,18 @@ mod tests {
             id: "account-a".to_string(),
             initial: Some('S'),
             enabled: true,
-            auth_handle: MonitorAuthHandle::Slot1,
+            auth_handle: Some(handle(1)),
+            display_name: Some("Sam".to_string()),
         };
         let serialized = serde_json::to_string(&metadata).unwrap();
-        assert!(serialized.contains("\"auth_handle\":\"slot-1\""));
+        assert!(serialized.contains("\"auth_handle\":\"owner-1\""));
         assert!(!serialized.contains("\\\\"));
         assert_eq!(
             serde_json::from_str::<MonitoredAccountMetadata>(&serialized).unwrap(),
             metadata
         );
-        assert_eq!(
-            MonitorAuthHandle::Slot1.namespace_key(),
-            "monitor-auth/slot-1"
-        );
-        assert_eq!(
-            MonitorAuthHandle::Slot2.namespace_key(),
-            "monitor-auth/slot-2"
-        );
+        assert_eq!(handle(1).namespace_key(), "monitor-auth/owner-1");
+        assert_eq!(handle(2).namespace_key(), "monitor-auth/owner-2");
         assert!(!serialized.contains("auth-spike"));
         assert!(!serialized.contains("C:"));
     }
@@ -1192,9 +1277,9 @@ mod tests {
         let projected = from_codex_auth_projection(Some("stable-account-id".into()), None)
             .expect("account id should produce an identity");
         assert_eq!(projected.id, "stable-account-id");
-        let account = MonitoredAccount::from_identity(&projected, MonitorAuthHandle::Slot2);
+        let account = MonitoredAccount::from_identity(&projected, Some(handle(2)));
         assert_eq!(account.id, "stable-account-id");
-        assert_eq!(account.auth_handle, MonitorAuthHandle::Slot2);
+        assert_eq!(account.auth_handle, Some(handle(2)));
     }
 
     #[test]
@@ -1209,18 +1294,10 @@ mod tests {
     fn duplicate_auth_owner_is_rejected_in_add_and_reconstruction() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Sam"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Sam"), handle(1)))
             .unwrap();
         assert_eq!(
-            registry.try_add(monitored(
-                "account-b",
-                Some("Nina"),
-                MonitorAuthHandle::Slot1,
-            )),
+            registry.try_add(monitored("account-b", Some("Nina"), handle(1),)),
             Err(RegistryError::DuplicateAuthOwner)
         );
 
@@ -1230,13 +1307,15 @@ mod tests {
                     id: "account-a".to_string(),
                     initial: Some('S'),
                     enabled: true,
-                    auth_handle: MonitorAuthHandle::Slot1,
+                    display_name: Some("Sam".to_string()),
+                    auth_handle: Some(handle(1)),
                 },
                 MonitoredAccountMetadata {
                     id: "account-b".to_string(),
                     initial: Some('N'),
                     enabled: true,
-                    auth_handle: MonitorAuthHandle::Slot1,
+                    display_name: Some("Nina".to_string()),
+                    auth_handle: Some(handle(1)),
                 },
             ],
         };
@@ -1250,36 +1329,132 @@ mod tests {
     fn full_registry_classifies_identity_and_owner_duplicates_before_capacity() {
         let mut registry = AccountRegistry::empty();
         registry
-            .try_add(monitored(
-                "account-a",
-                Some("Sam"),
-                MonitorAuthHandle::Slot1,
-            ))
+            .try_add(monitored("account-a", Some("Sam"), handle(1)))
             .unwrap();
         registry
-            .try_add(monitored(
-                "account-b",
-                Some("Nina"),
-                MonitorAuthHandle::Slot2,
-            ))
+            .try_add(monitored("account-b", Some("Nina"), handle(2)))
             .unwrap();
 
         assert_eq!(
-            registry.try_add(monitored(
-                "account-a",
-                Some("Alex"),
-                MonitorAuthHandle::Slot2,
-            )),
+            registry.try_add(monitored("account-a", Some("Alex"), handle(2),)),
             Err(RegistryError::DuplicateIdentity)
         );
         assert_eq!(
-            registry.try_add(monitored(
-                "account-c",
-                Some("Ray"),
-                MonitorAuthHandle::Slot1,
-            )),
+            registry.try_add(monitored("account-c", Some("Ray"), handle(1),)),
             Err(RegistryError::DuplicateAuthOwner)
         );
+    }
+
+    #[test]
+    fn collection_policy_supports_four_accounts_without_fixed_owner_variants() {
+        let mut registry = AccountRegistry::empty();
+        for index in 1..=MAX_RETAINED_ACCOUNTS {
+            registry
+                .try_add(monitored(
+                    &format!("account-{index}"),
+                    Some("Account"),
+                    handle(index as u32),
+                ))
+                .unwrap();
+        }
+
+        assert_eq!(registry.len(), MAX_RETAINED_ACCOUNTS);
+        assert_eq!(registry.allocate_auth_handle().unwrap().index(), 5);
+        assert_eq!(
+            registry.try_add(monitored("account-five", Some("Account"), handle(5))),
+            Err(RegistryError::CapacityReached)
+        );
+    }
+
+    #[test]
+    fn legacy_slot_metadata_migrates_to_dynamic_owner_handle() {
+        let legacy = r#"{
+            "id":"account-a",
+            "initial":"A",
+            "enabled":true,
+            "auth_handle":"slot-2"
+        }"#;
+        let metadata: MonitoredAccountMetadata = serde_json::from_str(legacy).unwrap();
+        assert_eq!(metadata.auth_handle, Some(handle(2)));
+
+        let serialized = serde_json::to_string(&metadata).unwrap();
+        assert!(serialized.contains("owner-2"));
+        assert!(!serialized.contains("slot-2"));
+        assert!(!serialized.contains("auth-spike"));
+        assert!(!serialized.contains("\\\\"));
+    }
+
+    #[test]
+    fn auto_discovery_retains_identity_without_copying_working_owner() {
+        let mut registry = AccountRegistry::empty();
+        let account_a = identity("account-a", Some("Alice"));
+        let account_b = identity("account-b", Some("Bob"));
+
+        assert!(registry.reconcile_working_identity(&account_a, true));
+        registry.set_active_identity(Some(&account_a));
+        assert_eq!(registry.accounts()[0].auth_handle, None);
+        assert_eq!(
+            registry.accounts()[0].connection_state,
+            ConnectionState::Connected
+        );
+
+        assert!(registry.reconcile_working_identity(&account_b, true));
+        registry.set_active_identity(Some(&account_b));
+        assert_eq!(
+            registry.accounts()[0].connection_state,
+            ConnectionState::ReauthRequired
+        );
+        assert_eq!(
+            registry.accounts()[1].connection_state,
+            ConnectionState::Connected
+        );
+        assert!(registry
+            .metadata()
+            .accounts
+            .iter()
+            .all(|account| account.auth_handle.is_none()));
+    }
+
+    #[test]
+    fn manual_add_attaches_owner_to_known_identity_without_duplicate_row() {
+        let mut registry = AccountRegistry::empty();
+        let account_a = identity("account-a", Some("Alice"));
+        assert!(registry.reconcile_working_identity(&account_a, true));
+
+        assert_eq!(
+            registry.reconcile_manual_identity(&account_a, handle(9)),
+            Ok(ManualIdentityResolution::Attached)
+        );
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.accounts()[0].auth_handle, Some(handle(9)));
+
+        assert_eq!(
+            registry.reconcile_manual_identity(&account_a, handle(10)),
+            Ok(ManualIdentityResolution::AlreadyMonitored)
+        );
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.accounts()[0].auth_handle, Some(handle(9)));
+    }
+
+    #[test]
+    fn active_role_is_runtime_only_and_follows_stable_identity() {
+        let mut registry = AccountRegistry::empty();
+        let account_a = identity("account-a", Some("Alice"));
+        let account_b = identity("account-b", Some("Bob"));
+        registry
+            .try_add(MonitoredAccount::from_identity(&account_a, Some(handle(1))))
+            .unwrap();
+        registry
+            .try_add(MonitoredAccount::from_identity(&account_b, Some(handle(2))))
+            .unwrap();
+
+        assert!(registry.is_active_id("account-a", Some("account-a")));
+        assert!(!registry.is_active_id("account-a", Some("account-b")));
+        registry.set_active_identity(Some(&account_b));
+        assert_eq!(registry.metadata().accounts[0].auth_handle, Some(handle(1)));
+        assert_eq!(registry.metadata().accounts[1].auth_handle, Some(handle(2)));
+        let serialized = serde_json::to_string(&registry.metadata()).unwrap();
+        assert!(!serialized.contains("active"));
     }
 
     #[test]
