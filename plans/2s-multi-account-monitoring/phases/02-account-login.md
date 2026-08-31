@@ -1,17 +1,20 @@
 # Phase 02 — Account Login & Lifecycle
 
-**Status:** `in-progress — amended`
+**Status:** `in-progress — amended proof closure`
 **Goal:** reconcile the account model to collection-driven max-four retention, automatically discover the current working Codex identity, and provide safe manual add/re-auth/remove flows without changing the user's active Codex account.
 
 ## Current authority
 
-This phase is governed by [`../PRODUCT-AMENDMENT-2026-08-31.md`](../PRODUCT-AMENDMENT-2026-08-31.md).
+This phase is governed by both:
 
-The pre-amendment two-account runtime walkthrough is superseded. Do not continue it until the implementation below is complete and ready for new evidence.
+- [`../PRODUCT-AMENDMENT-2026-08-31.md`](../PRODUCT-AMENDMENT-2026-08-31.md) for product/account behavior;
+- [`../PROOF-CONTRACT-AMENDMENT-2026-09-01.md`](../PROOF-CONTRACT-AMENDMENT-2026-09-01.md) for accepted proof modality.
+
+Where older Phase 02 wording required three, four, or five distinct real accounts solely to prove collection cardinality/capacity, the proof-contract amendment supersedes that proof requirement. The max-four product behavior itself is unchanged.
 
 ## Account lifecycle model
 
-2S owns a collection of known/retained identities plus a runtime projection of which identity is currently active in normal Codex.
+2S owns a collection of retained identities plus a runtime projection of which identity is currently active in normal Codex.
 
 ```text
 Known account identity
@@ -34,28 +37,28 @@ The implementation must be structurally collection/N-capable. Current runtime po
 MAX_RETAINED_ACCOUNTS = 4
 ```
 
-Required reconciliation:
+Required behavior:
 
-- replace fixed `Slot1/Slot2` capacity design with a validated collection-friendly logical owner handle/index or equivalent;
-- do not merely add `Slot3/Slot4` enum variants;
-- remove per-slot account/action assumptions from lifecycle routing;
-- preserve one stable identity ↔ at most one retained account row;
-- preserve one monitor credential owner ↔ at most one account;
-- preserve deterministic ordering and non-secret persistence.
+- validated collection-friendly logical owner handle/index or equivalent;
+- no `Slot1|Slot2|Slot3|Slot4` capacity type;
+- no per-slot lifecycle/action routing;
+- one stable identity ↔ at most one retained row;
+- one monitor credential owner ↔ at most one account;
+- deterministic ordering and non-secret persistence.
 
 ## Automatic working-account discovery
 
-On startup and whenever the working Codex credential identity changes:
+On startup and whenever working Codex identity changes:
 
 1. read the current stable identity through the existing account adapter;
-2. if already known, mark that identity active at runtime;
-3. if new and retained capacity is available, persist it as a known account;
-4. when the current identity changes A → B, B becomes active and A remains retained until explicit removal;
-5. never create a duplicate row for an identity discovered through both automatic and manual paths.
+2. if already known, mark it active at runtime;
+3. if new and retained capacity is available, retain it automatically;
+4. when A → B, B becomes active and A remains retained until explicit removal;
+5. never duplicate an identity discovered through automatic and manual paths.
 
-Automatic discovery is identity discovery only. It must not copy the working access/refresh token into a monitor owner.
+Automatic discovery is identity-only. It must not copy working access/refresh tokens into a monitor owner.
 
-If an auto-discovered identity has no independent monitor owner when it later becomes inactive, retain the identity but show an explicit unavailable/re-auth-required state until safe monitor ownership exists.
+If an auto-discovered identity lacks an independent monitor owner after it becomes inactive, retain the identity but show explicit re-auth/unavailable state until safe ownership exists.
 
 ## Manual Add monitor account
 
@@ -63,138 +66,183 @@ Context-menu action: `Add monitor account...`.
 
 Flow:
 
-1. Preflight retained capacity and lifecycle availability.
-2. If four retained accounts already exist, the menu/action is disabled and OAuth/login must not start.
-3. Allocate an unused logical monitor owner dynamically.
-4. Start the Phase 00 approved direct `codex-login` flow.
-5. Complete/cancel/timeout transactionally.
-6. Read stable identity.
-7. If identity is new, add it to the registry subject to current policy.
-8. If identity already exists, reconcile/attach/repair that account's monitor owner instead of creating a duplicate row.
-9. Run bounded initial usage read.
-10. Refresh account/menu/widget state.
+1. preflight retained capacity and lifecycle availability;
+2. at four retained accounts, disable/reject before OAuth/login dispatch;
+3. allocate unused logical monitor owner dynamically;
+4. start approved direct `codex-login` flow;
+5. complete/cancel/timeout transactionally;
+6. read stable identity;
+7. add new identity or reconcile existing identity;
+8. never create a duplicate row;
+9. run bounded initial usage read;
+10. refresh account/menu/widget state.
 
-Manual add must never replace the normal working Codex credential.
+Manual Add must never replace normal working Codex credentials.
 
 ## Credential transaction requirements
 
-The credential-owner transaction must remain safe across success, duplicate, identity mismatch, cancellation, timeout, and failure.
+Before Add/Re-auth, capture owner state as `Absent` or restorable previous credential snapshot when available.
 
-Before a login/re-auth attempt, capture owner state as `Absent` or a restorable previous credential snapshot when available.
-
-- committed success → keep the new owner state;
+- committed success → keep new owner state;
 - any non-commit exit after possible owner mutation → restore previous owner or clear newly-created owner;
-- rollback failure → explicit degraded error; never claim previous ownership is safe when it may not be;
-- re-auth may start even if the previous credential is missing;
-- re-auth resolving to another stable identity must never silently replace the account identity.
+- rollback failure → explicit degraded error;
+- missing previous owner must not block true re-auth;
+- re-auth resolving to another stable identity must not silently replace the selected account.
 
 ## Re-authenticate
 
-Each account entry directly exposes `Re-authenticate`.
+Each account directly exposes `Re-authenticate`.
 
-- Applies only to the selected identity/monitor owner.
-- Other account state remains intact.
-- For current active account with no monitor owner, re-auth may provision a monitor owner without changing normal Codex active auth.
-- Identity mismatch requires explicit failure/reconciliation; no silent replace.
+- scope to the selected identity/monitor owner;
+- other accounts remain intact;
+- current active account without monitor owner may provision one without changing normal Codex active auth;
+- identity mismatch is explicit failure/reconciliation, never silent replacement.
 
 ## Remove from monitor
 
-Each account entry directly exposes `Remove from monitor`.
+Each account directly exposes `Remove from monitor`.
 
-- Remove only retained registry state and monitor-owned credential for that identity.
-- Never call normal Codex logout or mutate working `~/.codex` state.
-- Removing an inactive account removes it from the retained collection.
-- Removing the currently active account removes retained/monitor ownership, but the current account remains visible as current-only while normal Codex is still logged into it.
-- Do not immediately re-retain the same current identity simply because periodic identity observation repeats; removal must remain effective for the current active session.
+- remove only retained state and selected monitor-owned credential;
+- never call normal Codex logout;
+- inactive remove removes the retained row;
+- current-account remove removes retention/monitor ownership but leaves current identity visible current-only while normal Codex remains logged in;
+- repeated observation of the same current identity must not immediately re-retain it during that active session.
 
 ## Full-capacity active identity
 
-When four identities are retained and normal Codex independently changes to a new fifth identity:
+When A/B/C/D are retained and normal Codex independently changes to unknown E:
 
-- recognize and display the new identity as current-only;
-- do not persist it automatically;
-- do not evict any retained account;
-- manual add remains disabled;
-- after the user removes a retained account, the current identity may be retained through the normal discovery/reconciliation path.
+- recognize E current-only;
+- do not persist E automatically;
+- do not evict A/B/C/D;
+- manual Add remains disabled;
+- after capacity is explicitly freed, E may be retained through normal discovery/reconciliation.
 
 ## Accounts context menu
-
-Remove the nested `Manage accounts >` submenu.
 
 Target:
 
 ```text
 Accounts >
-  Account                         (disabled label)
-  Sidik · Active              >
-  Sol                         >
+  Account
+  Sidik · Active >
+  Sol            >
   ...
   ─────────────────────────────
-  Manage account                  (disabled label)
+  Manage account
   Add monitor account...
 ```
 
-Each account submenu:
+`Account` and `Manage account` are disabled labels. Each account submenu contains:
 
 ```text
 Re-authenticate
 Remove from monitor
 ```
 
-Requirements:
+Routing is dynamic by stable account identity. No nested `Manage accounts >` layer and no fixed per-slot command IDs.
 
-- display name preferred; initial fallback;
-- runtime current account may show `· Active`;
-- menu actions route dynamically to account identity/owner, not fixed slot constants;
-- `Add monitor account...` disabled at four retained accounts or while conflicting lifecycle work is active;
-- `Cancel login` may appear only while an interactive login is active.
+## Implementation status
 
-## Tasks
+Current implementation checkpoint under review:
 
-- [ ] Generalize account-owner handle/capacity model without fixed Slot1/Slot2 variants.
-- [ ] Set runtime retained-account policy to four.
-- [ ] Preserve duplicate identity and unique-owner invariants.
-- [ ] Add automatic current-account discovery on startup and working-identity change.
-- [ ] Add runtime active-role matching separate from persistence.
-- [ ] Preserve/finish transaction-safe Add/Re-auth rollback behavior.
-- [ ] Reconcile manual duplicate login into the existing identity rather than a duplicate row.
-- [ ] Add direct per-account context-menu actions; remove nested Manage accounts layer.
-- [ ] Disable fifth manual add before browser login.
-- [ ] Implement current-only overflow behavior when normal Codex changes identity at full retained capacity.
-- [ ] Implement remove semantics for active and inactive accounts without normal Codex logout.
-- [ ] Run bounded initial usage read after successful owner provisioning.
-- [ ] Add deterministic tests for all lifecycle transitions.
+```text
+537b2bbad951ccbb43f04ba9067b55b304f4d232
+```
+
+At this checkpoint the source/automated gate has already established:
+
+- dynamic monitor-owner index with legacy physical owner continuity;
+- max-four policy;
+- optional monitor owner for auto-discovered identities;
+- automatic current-account discovery and runtime active role;
+- current-only overflow state model;
+- duplicate manual identity reconciliation;
+- direct collection-driven account menu routing;
+- fifth Add preflight policy;
+- active/inactive remove semantics;
+- transaction-safe Add/Re-auth rollback;
+- bounded initial usage operation;
+- corrected dynamic Win32 menu-route lifetime.
+
+## Real-account runtime evidence already accepted for this checkpoint
+
+Owner-observed runtime with the available two real accounts has proven:
+
+- startup auto-discovery of A;
+- A → B switch: B active, A retained, no duplicate;
+- manual Add resolving to known B reconciles/attaches rather than duplicating;
+- restart preserves retained rows and re-derives active role;
+- Re-authenticate routes and completes for the selected real account;
+- remove inactive B;
+- remove current B leaves normal Codex logged in and B current-only until identity changes;
+- direct Re-auth/Remove menu routing works after the route-lifetime correction;
+- captured evidence contains no raw credential/token/OAuth code/email/account ID.
+
+This is Class R evidence under the proof-contract amendment and does not need to be rerun unless implementation changes invalidate it.
+
+## Remaining Phase 02 proof closure
+
+No extra real Codex accounts are required.
+
+Luna must add/confirm deterministic Class F/S proof for:
+
+- A/B/C/D can coexist as four retained identities without position-specific branches;
+- fifth manual Add is disabled/rejected before OAuth/login dispatch;
+- at full retained capacity, unknown E remains current-only;
+- A/B/C/D are not silently evicted or assigned E's ownership;
+- after capacity is freed, normal retention/reconciliation can proceed;
+- bounded initial usage result/error is consumed into the selected account state;
+- fixture/state-machine evidence contains no synthetic auth token/credential claims.
+
+Fixtures must be identity/state/data fixtures only. Do not fabricate OAuth credentials, refresh tokens, or fake real login success.
 
 ## Acceptance criteria
 
-- First launch with working Codex Account A shows A automatically without requiring `Add monitor account...`.
-- Switching normal Codex A → B makes B active and keeps A retained; no duplicate identity row appears.
-- Manual Add B while A is active can create/reconcile B without changing normal Codex active auth.
-- A manual login resolving to an already-known identity attaches/reconciles ownership rather than creating a duplicate row.
-- Up to four retained identities are supported by policy without account-position hard-coding.
-- Fifth manual add is disabled before OAuth/login starts.
-- At full retained capacity, switching normal Codex to unknown E recognizes E current-only and silently evicts nothing.
-- Cancel/timeout/failure leaves registry and credential ownership transactionally consistent.
-- Re-auth for one account cannot damage another.
-- Remove deletes only selected monitor ownership/retention and never logs normal Codex out.
-- Restart reconstructs retained metadata without exposing secrets.
-- No app-server/TUI/`codex exec`/inference/account-switching path is introduced for monitor auth.
+Phase 02 PASS requires the combined proof set:
+
+### Class R — real-account runtime
+
+- first launch auto-discovers A;
+- A → B moves runtime active role and retains A;
+- manual Add/reconcile works without changing normal Codex active auth;
+- restart re-derives active role;
+- Re-auth is account-scoped;
+- remove inactive/current semantics are correct and never log normal Codex out;
+- real menu routing works;
+- evidence is secret-safe.
+
+### Class F/S — deterministic
+
+- four retained identities supported under policy;
+- fifth Add unavailable before login dispatch;
+- full-capacity unknown E current-only with no eviction/owner theft;
+- capacity release/reconciliation transition correct;
+- rollback/mismatch/missing-owner deterministic paths remain safe;
+- one-shot initial usage completion/error recording is proven at the correct production seam;
+- architecture remains collection-driven and max-four is policy, not shape.
+
+No third, fourth, or fifth real account is required solely for these higher-cardinality claims.
 
 ## Hard stops
 
-- No `Make Active`, `Switch`, `Use this account`, or automatic account switching.
-- Do not use the working Codex auth file as an Add/Re-auth scratch target.
-- Do not copy the working refresh token to make auto-discovered accounts independently monitorable.
-- Do not encode the four-account policy as four enum variants or four account-specific lifecycle branches.
-- If an inactive auto-discovered account cannot remain live without unsafe credential copying, preserve explicit unavailable/re-auth state and report the limitation; do not fake success.
+- no Make Active/Switch/Use-this-account behavior;
+- no working-Codex auth file as Add/Re-auth scratch;
+- no copying working refresh token into monitor owner;
+- no fixed four-account type/branch design;
+- no synthetic credential fixture presented as auth proof;
+- no fake success for inactive accounts without safe monitor ownership.
 
 ## Evidence
 
-Before Phase 02 can pass, update `../EVIDENCE.md` to the exact reconciled implementation checkpoint and record:
+Before Phase 02 can pass:
 
-- automated lifecycle/generalization tests;
-- current command verification;
-- a new owner-approved runtime walkthrough covering automatic discovery, A→B switch retention, manual add, duplicate reconciliation, restart, re-auth, remove, and max-four/fifth-add-disabled behavior;
-- working-Codex before/after safety proof without raw credentials.
+1. retain the already-recorded two-account Class R runtime evidence;
+2. add exact deterministic fixture/test names and results for the Class F/S closure items;
+3. label each evidence item as real runtime, deterministic fixture, or source/state-machine proof;
+4. run current verification commands;
+5. record the exact implementation checkpoint used by those tests;
+6. update `../EVIDENCE.md` accordingly;
+7. stop at `Phase 02 — READY FOR SOL FINAL GATE`.
 
-Then stop at `READY FOR SOL REVIEW`. Phase 03 remains blocked until Sol PASS.
+Phase 03 remains blocked until Sol reviews the fixture proof and issues Phase 02 PASS.
