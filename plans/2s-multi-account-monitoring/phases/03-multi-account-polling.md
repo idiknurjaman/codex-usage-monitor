@@ -1,69 +1,104 @@
 # Phase 03 — Multi-Account Polling
 
 **Status:** `blocked-by-phase-02`
-**Goal:** poll both monitored Codex accounts independently, preserve account attribution, and isolate failures/alerts.
+**Goal:** poll the account collection independently, preserve stable attribution and runtime active role, and isolate failures/alerts without account-position hard-coding.
+
+## Preconditions
+
+Phase 02 must have a Sol PASS for the amended account model before this phase begins.
+
+The account collection may contain up to four retained identities plus, at full retained capacity, a current-only active identity discovered from normal Codex. Polling code must consume account/capability state rather than assume A/B or slot positions.
 
 ## Polling model
 
-Each account owns an independent poll attempt:
+Conceptually:
 
 ```text
 poll cycle
-  ├─ account S -> auth -> rate limits -> S usage state
-  └─ account N -> auth -> rate limits -> N usage state
+  for each effective account identity
+    resolve approved credential source
+    read quota
+    publish result by stable account id
 ```
 
-A provider-level failure must not collapse the entire multi-account result.
+Credential source selection is separate from active-role presentation:
+
+- retained account with monitor owner → use that isolated monitor owner;
+- current-only/active account without monitor owner → working Codex read path may provide current usage;
+- inactive retained account without monitor owner → explicit unavailable/re-auth state; do not borrow another account's credential.
+
+If an account is both active and has its own monitor owner, source selection must be deterministic and must not create token-copy/refresh races. Active role itself does not decide identity ownership.
 
 ## Requirements
 
-- Poll the approved read-only rate-limit interface from Phase 00.
-- No `codex exec` or inference request for refresh/polling.
+- Poll the approved read-only Codex usage interface.
+- No `codex exec` or inference request for monitor refresh/polling.
 - Keep canonical `used_percentage: Option<f64>` semantics.
-- Convert Codex used percentage to remaining only at display/alert boundaries.
+- Convert used percentage to remaining only at display/alert boundaries.
 - Keep missing session/weekly windows unavailable rather than zero.
-- Associate every usage result with a stable account ID before publishing state.
+- Associate every result/error with a stable account ID before publishing state.
 - Poll failures are per-account and categorized.
-- Preserve last known usage only if the UI clearly distinguishes stale/unavailable state; otherwise show unavailable. Do not silently present stale values as current.
-- A refresh/auth failure for one account must not pause polling for another.
+- One account failure must not pause or invalidate another.
+- Preserve last-known usage only if UI explicitly marks it stale; otherwise show unavailable.
+- Refresh/auth lifecycle is scoped to the selected monitor owner.
+- Poll orchestration iterates the account collection; no `poll_account_a/b`, `poll_slot_1/2`, or fixed four-account branching.
+- Runtime product capacity remains four retained accounts; polling capability itself must not encode four as its structural shape.
 
 ## Account-scoped alerts
 
-Alert deduplication keys must include stable account identity, provider, quota window, threshold/reset identity, for example conceptually:
+Alert deduplication keys must include stable account identity, provider, quota window, threshold, and reset identity, conceptually:
 
 ```text
-<account-id>:codex:session:<reset-key>
+<account-id>:codex:<window>:<threshold>:<reset-key>
 ```
 
-The one-letter initial is not a safe alert key.
+Initial/name is presentation only and is never a safe alert key.
+
+## Automatic active-role updates
+
+Working Codex identity observation may change independently from the polling interval.
+
+When current identity changes:
+
+- active marker moves by stable identity matching;
+- quota results remain attached to their account IDs;
+- the old active account does not lose its retained monitor state;
+- the new active account does not steal another account's monitor owner;
+- an unknown current-only identity at full retained capacity may be polled only through the safe current working source until retention/owner capacity is available.
 
 ## Tasks
 
-- [ ] Introduce per-account poll orchestration.
-- [ ] Add result aggregation that preserves successful accounts when another fails.
-- [ ] Add per-account connection/error state.
-- [ ] Add per-account refresh behavior using the Phase 00 approved mechanism.
+- [ ] Introduce collection-driven per-account poll orchestration.
+- [ ] Resolve credential source per account without identity ambiguity.
+- [ ] Aggregate results while preserving healthy accounts when another fails.
+- [ ] Add per-account connection/error/stale state.
+- [ ] Add monitor-owner refresh behavior using the Phase 00 approved mechanism.
 - [ ] Remove multi-account dependency on `cli_refresh_codex_token()` / `codex exec "."`.
 - [ ] Account-scope low-quota alert deduplication.
-- [ ] Handle weekly-only responses correctly per account.
-- [ ] Handle independently different reset times.
-- [ ] Add tests for mixed success/failure, auth-required, weekly-only, unavailable windows, and alert isolation.
+- [ ] Handle weekly-only/missing-window responses independently per account.
+- [ ] Handle different reset times independently.
+- [ ] Preserve active-role changes independently from quota attribution.
+- [ ] Add tests across 1, 2, and 4 retained accounts plus mixed success/failure.
 
 ## Acceptance criteria
 
-- Two accounts can show different 5h/7d values in the same process.
-- Account S can fail while Account N continues to update.
-- A 10% alert for S does not suppress a separate 10% alert for N.
+- Distinct accounts can show distinct 5h/7d values in one process.
+- Polling works through collection iteration with no position-specific branches.
+- One account can fail while all other healthy accounts continue updating.
+- Auth expiry for one monitor owner does not pause another.
 - Missing 5h on one account never renders as `0% remaining`.
+- Account attribution remains stable across refresh, active-account changes, and restart.
+- Alert deduplication remains independent per stable identity/window/reset.
+- Current-only active overflow at retained capacity never borrows or evicts another account's credential owner.
 - Poll/refresh path makes zero intentional inference requests.
-- Account attribution remains stable across refresh and process restart.
 
 ## Hard stops
 
-- Do not solve auth failure by copying a token from another account.
+- Do not solve auth failure by copying a token from another account or from the normal working credential.
 - Do not temporarily replace the working Codex auth file to perform a poll.
 - Do not add account switching as a fallback.
+- Do not reintroduce account-position coupling for convenience.
 
 ## Evidence
 
-Record current tests plus a runtime proof of simultaneous distinct account values and one-account failure isolation in `../EVIDENCE.md`.
+Record current tests plus runtime proof of distinct simultaneous account values, one-account failure isolation, active-role switch attribution, and a four-retained-account smoke test in `../EVIDENCE.md` at the exact implementation checkpoint.
