@@ -11,8 +11,8 @@ use std::time::SystemTime;
 
 use codex_http_client::{HttpClientFactory, OutboundProxyPolicy};
 use codex_login::{
-    AuthCredentialsStoreMode, AuthDotJson, AuthKeyringBackendKind, AuthManager, LoginSuccessPage,
-    ServerOptions, TokenData, CLIENT_ID,
+    AuthCredentialsStoreMode, AuthDotJson, AuthKeyringBackendKind, AuthManager, CodexAuth,
+    LoginSuccessPage, ServerOptions, TokenData, CLIENT_ID,
 };
 
 use crate::models::UsageData;
@@ -89,6 +89,46 @@ pub enum ConnectionState {
     Connected,
     ReauthRequired,
     Unavailable,
+}
+
+/// The only credential states that the monitor transaction needs to expose to
+/// its decision layer. The credential contents never enter this model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CredentialOwnerState {
+    Absent,
+    Present,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CredentialTransactionDecision {
+    Commit,
+    Rollback,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CredentialTransactionResult {
+    Committed(CredentialOwnerState),
+    RolledBack(CredentialOwnerState),
+    RollbackFailed,
+}
+
+/// Resolve the non-secret transaction decision independently from the
+/// credential backend. This is the deterministic state-machine seam used by
+/// lifecycle tests; production rollback still performs the real owner restore
+/// or clear operation.
+pub fn resolve_credential_transaction(
+    previous: CredentialOwnerState,
+    current: CredentialOwnerState,
+    decision: CredentialTransactionDecision,
+    rollback_succeeded: bool,
+) -> CredentialTransactionResult {
+    match decision {
+        CredentialTransactionDecision::Commit => CredentialTransactionResult::Committed(current),
+        CredentialTransactionDecision::Rollback if rollback_succeeded => {
+            CredentialTransactionResult::RolledBack(previous)
+        }
+        CredentialTransactionDecision::Rollback => CredentialTransactionResult::RollbackFailed,
+    }
 }
 
 /// Runtime account state. Only `metadata()` is persisted.
@@ -235,6 +275,34 @@ impl AccountRegistry {
         true
     }
 
+    pub fn record_usage(&mut self, account_id: &str, usage: UsageData) -> bool {
+        let Some(account) = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.id == account_id)
+        else {
+            return false;
+        };
+        account.connection_state = ConnectionState::Connected;
+        account.usage = Some(usage);
+        account.last_success_at = Some(SystemTime::now());
+        account.last_error = None;
+        true
+    }
+
+    pub fn record_usage_error(&mut self, account_id: &str, error: &str) -> bool {
+        let Some(account) = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.id == account_id)
+        else {
+            return false;
+        };
+        account.connection_state = ConnectionState::Unavailable;
+        account.last_error = Some(error.to_string());
+        true
+    }
+
     pub fn update_auth_handle(
         &mut self,
         account_id: &str,
@@ -359,6 +427,9 @@ pub enum LoginError {
     NotAuthenticated,
     IdentityUnavailable,
     IdentityChanged,
+    DuplicateAccount,
+    RollbackFailed,
+    InitialUsageFailed,
 }
 
 impl LoginError {
@@ -374,6 +445,28 @@ impl LoginError {
             Self::IdentityChanged => {
                 "Re-authentication resolved to a different account; the existing account was kept."
             }
+            Self::DuplicateAccount => "This account is already monitored.",
+            Self::RollbackFailed => {
+                "Account login failed and the monitor credential could not be rolled back."
+            }
+            Self::InitialUsageFailed => {
+                "The account signed in, but its initial usage could not be read."
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum CredentialSnapshot {
+    Absent,
+    Present(TokenData),
+}
+
+impl CredentialSnapshot {
+    fn state(&self) -> CredentialOwnerState {
+        match self {
+            Self::Absent => CredentialOwnerState::Absent,
+            Self::Present(_) => CredentialOwnerState::Present,
         }
     }
 }
@@ -383,23 +476,32 @@ pub struct LoginOperation {
     expected_identity: Option<String>,
     cancel_requested: Arc<AtomicBool>,
     cancel_handle: Arc<Mutex<Option<codex_login::ShutdownHandle>>>,
+    snapshot: Arc<Mutex<Option<CredentialSnapshot>>>,
     result_rx: Receiver<Result<AccountIdentity, LoginError>>,
 }
 
 impl LoginOperation {
-    pub fn start(handle: MonitorAuthHandle, expected_identity: Option<String>) -> Self {
+    pub fn start(
+        handle: MonitorAuthHandle,
+        expected_identity: Option<String>,
+        existing_identity_ids: Vec<String>,
+    ) -> Self {
         let cancel_requested = Arc::new(AtomicBool::new(false));
         let cancel_handle = Arc::new(Mutex::new(None));
+        let snapshot = Arc::new(Mutex::new(None));
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let worker_cancel_requested = Arc::clone(&cancel_requested);
         let worker_cancel_handle = Arc::clone(&cancel_handle);
+        let worker_snapshot = Arc::clone(&snapshot);
         let worker_expected_identity = expected_identity.clone();
         thread::spawn(move || {
             let result = run_login(
                 handle,
                 worker_expected_identity,
+                existing_identity_ids,
                 worker_cancel_requested,
                 worker_cancel_handle,
+                worker_snapshot,
             );
             let _ = result_tx.send(result);
         });
@@ -408,6 +510,7 @@ impl LoginOperation {
             expected_identity,
             cancel_requested,
             cancel_handle,
+            snapshot,
             result_rx,
         }
     }
@@ -439,11 +542,75 @@ impl LoginOperation {
             Err(TryRecvError::Disconnected) => Err(TryRecvError::Disconnected),
         }
     }
+
+    pub fn commit(&self) {
+        let snapshot = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(snapshot) = snapshot {
+            debug_assert!(matches!(
+                resolve_credential_transaction(
+                    snapshot.state(),
+                    CredentialOwnerState::Present,
+                    CredentialTransactionDecision::Commit,
+                    false,
+                ),
+                CredentialTransactionResult::Committed(_)
+            ));
+        }
+    }
+
+    pub fn rollback(&self) -> Result<(), LoginError> {
+        let snapshot = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or(LoginError::RollbackFailed)?;
+        let storage_path = self
+            .handle
+            .storage_path()
+            .ok_or(LoginError::RollbackFailed)?;
+        restore_owner_snapshot(&storage_path, &snapshot)
+    }
 }
 
 pub struct CleanupOperation {
     account_id: String,
     result_rx: Receiver<Result<(), LoginError>>,
+}
+
+pub struct InitialUsageOperation {
+    account_id: String,
+    result_rx: Receiver<Result<UsageData, LoginError>>,
+}
+
+impl InitialUsageOperation {
+    pub fn start(account_id: String, handle: MonitorAuthHandle) -> Self {
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let result = run_initial_usage_read(handle);
+            let _ = result_tx.send(result);
+        });
+        Self {
+            account_id,
+            result_rx,
+        }
+    }
+
+    pub fn account_id(&self) -> &str {
+        &self.account_id
+    }
+
+    pub fn try_result(&self) -> Result<Option<Result<UsageData, LoginError>>, TryRecvError> {
+        match self.result_rx.try_recv() {
+            Ok(result) => Ok(Some(result)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(TryRecvError::Disconnected),
+        }
+    }
 }
 
 impl CleanupOperation {
@@ -494,17 +661,28 @@ async fn auth_manager(handle: MonitorAuthHandle) -> Result<Arc<AuthManager>, Log
     .await)
 }
 
-pub fn cleanup_monitor_owner_in_background(handle: MonitorAuthHandle) {
-    thread::spawn(move || {
-        let _ = run_cleanup(handle);
-    });
+fn capture_reauth_snapshot(
+    auth: Option<&CodexAuth>,
+    expected_identity: &str,
+) -> CredentialSnapshot {
+    let Some(auth) = auth else {
+        return CredentialSnapshot::Absent;
+    };
+    if auth.get_account_id().as_deref() != Some(expected_identity) {
+        return CredentialSnapshot::Absent;
+    }
+    auth.get_token_data()
+        .map(CredentialSnapshot::Present)
+        .unwrap_or(CredentialSnapshot::Absent)
 }
 
 fn run_login(
     handle: MonitorAuthHandle,
     expected_identity: Option<String>,
+    existing_identity_ids: Vec<String>,
     cancel_requested: Arc<AtomicBool>,
     cancel_handle: Arc<Mutex<Option<codex_login::ShutdownHandle>>>,
+    snapshot_slot: Arc<Mutex<Option<CredentialSnapshot>>>,
 ) -> Result<AccountIdentity, LoginError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -515,21 +693,21 @@ fn run_login(
             .storage_path()
             .ok_or(LoginError::AuthNamespaceUnavailable)?;
 
-        let previous_tokens = if expected_identity.is_some() {
+        let previous_snapshot = if let Some(expected_identity) = expected_identity.as_deref() {
             let manager = auth_manager(handle).await?;
-            let auth = manager.auth().await.ok_or(LoginError::NotAuthenticated)?;
-            if auth.get_account_id() != expected_identity {
-                return Err(LoginError::IdentityUnavailable);
-            }
-            Some(
-                auth.get_token_data()
-                    .map_err(|_| LoginError::NotAuthenticated)?,
-            )
+            capture_reauth_snapshot(manager.auth().await.as_ref(), expected_identity)
         } else {
-            None
+            CredentialSnapshot::Absent
         };
+        *snapshot_slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous_snapshot.clone());
 
         if cancel_requested.load(Ordering::Acquire) {
+            snapshot_slot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
             return Err(LoginError::Cancelled);
         }
 
@@ -543,7 +721,16 @@ fn run_login(
         );
         options.port = 1455;
         options.login_success_page = LoginSuccessPage::Local;
-        let server = codex_login::run_login_server(options).map_err(|_| LoginError::LoginFailed)?;
+        let server = match codex_login::run_login_server(options) {
+            Ok(server) => server,
+            Err(_) => {
+                snapshot_slot
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                return Err(LoginError::LoginFailed);
+            }
+        };
         let shutdown = server.cancel_handle();
         *cancel_handle
             .lock()
@@ -560,36 +747,144 @@ fn run_login(
         {
             Ok(Ok(callback)) => callback,
             Ok(Err(_)) if cancel_requested.load(Ordering::Acquire) => {
-                return Err(LoginError::Cancelled);
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::Cancelled,
+                );
             }
-            Ok(Err(_)) => return Err(LoginError::LoginFailed),
+            Ok(Err(_)) => {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::LoginFailed,
+                );
+            }
             Err(_) => {
                 shutdown.shutdown();
-                return Err(LoginError::TimedOut);
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::TimedOut,
+                );
             }
         };
         let _ = callback;
 
-        let manager = auth_manager(handle).await?;
-        let auth = manager.auth().await.ok_or(LoginError::NotAuthenticated)?;
-        let token_data = auth
-            .get_token_data()
-            .map_err(|_| LoginError::NotAuthenticated)?;
-        let identity =
-            from_codex_auth_projection(auth.get_account_id(), Some(&token_data.id_token.raw_jwt))
-                .ok_or(LoginError::IdentityUnavailable)?;
-
-        if let Some(expected_identity) = expected_identity {
-            if identity.id != expected_identity {
-                if let Some(previous_tokens) = previous_tokens {
-                    restore_managed_tokens(&storage_path, previous_tokens)?;
-                }
-                return Err(LoginError::IdentityChanged);
+        let manager = match auth_manager(handle).await {
+            Ok(manager) => manager,
+            Err(_) => {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::AuthNamespaceUnavailable,
+                );
             }
+        };
+        let auth = match manager.auth().await {
+            Some(auth) => auth,
+            None => {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::NotAuthenticated,
+                );
+            }
+        };
+        let token_data = match auth.get_token_data() {
+            Ok(token_data) => token_data,
+            Err(_) => {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::NotAuthenticated,
+                );
+            }
+        };
+        let identity = match from_codex_auth_projection(
+            auth.get_account_id(),
+            Some(&token_data.id_token.raw_jwt),
+        ) {
+            Some(identity) => identity,
+            None => {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::IdentityUnavailable,
+                );
+            }
+        };
+
+        if let Some(expected_identity) = expected_identity.as_deref() {
+            if identity.id != expected_identity {
+                return rollback_login_error(
+                    &storage_path,
+                    &previous_snapshot,
+                    &snapshot_slot,
+                    LoginError::IdentityChanged,
+                );
+            }
+        } else if existing_identity_ids
+            .iter()
+            .any(|existing_id| existing_id == &identity.id)
+        {
+            return rollback_login_error(
+                &storage_path,
+                &previous_snapshot,
+                &snapshot_slot,
+                LoginError::DuplicateAccount,
+            );
         }
 
         Ok(identity)
     })
+}
+
+fn rollback_login_error(
+    path: &std::path::Path,
+    snapshot: &CredentialSnapshot,
+    snapshot_slot: &Arc<Mutex<Option<CredentialSnapshot>>>,
+    error: LoginError,
+) -> Result<AccountIdentity, LoginError> {
+    let rollback_result = restore_owner_snapshot(path, snapshot);
+    snapshot_slot
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    match resolve_credential_transaction(
+        snapshot.state(),
+        CredentialOwnerState::Present,
+        CredentialTransactionDecision::Rollback,
+        rollback_result.is_ok(),
+    ) {
+        CredentialTransactionResult::RolledBack(_) => Err(error),
+        CredentialTransactionResult::RollbackFailed | CredentialTransactionResult::Committed(_) => {
+            Err(LoginError::RollbackFailed)
+        }
+    }
+}
+
+fn restore_owner_snapshot(
+    path: &std::path::Path,
+    snapshot: &CredentialSnapshot,
+) -> Result<(), LoginError> {
+    match snapshot {
+        CredentialSnapshot::Present(tokens) => restore_managed_tokens(path, tokens.clone()),
+        CredentialSnapshot::Absent => codex_login::logout(
+            path,
+            AuthCredentialsStoreMode::Keyring,
+            AuthKeyringBackendKind::Secrets,
+        )
+        .map(|_| ())
+        .map_err(|_| LoginError::RollbackFailed),
+    }
 }
 
 fn restore_managed_tokens(path: &std::path::Path, tokens: TokenData) -> Result<(), LoginError> {
@@ -609,7 +904,26 @@ fn restore_managed_tokens(path: &std::path::Path, tokens: TokenData) -> Result<(
         AuthCredentialsStoreMode::Keyring,
         AuthKeyringBackendKind::Secrets,
     )
-    .map_err(|_| LoginError::LoginFailed)
+    .map_err(|_| LoginError::RollbackFailed)
+}
+
+pub fn read_initial_usage(handle: MonitorAuthHandle) -> Result<UsageData, LoginError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| LoginError::RuntimeUnavailable)?;
+    runtime.block_on(async move {
+        let manager = auth_manager(handle).await?;
+        let auth = manager.auth().await.ok_or(LoginError::NotAuthenticated)?;
+        let token = auth.get_token().map_err(|_| LoginError::NotAuthenticated)?;
+        let account_id = auth.get_account_id();
+        crate::poller::read_codex_usage_for_account(&token, account_id.as_deref())
+            .map_err(|_| LoginError::InitialUsageFailed)
+    })
+}
+
+fn run_initial_usage_read(handle: MonitorAuthHandle) -> Result<UsageData, LoginError> {
+    read_initial_usage(handle)
 }
 
 fn run_cleanup(handle: MonitorAuthHandle) -> Result<(), LoginError> {
@@ -965,6 +1279,141 @@ mod tests {
                 MonitorAuthHandle::Slot1,
             )),
             Err(RegistryError::DuplicateAuthOwner)
+        );
+    }
+
+    #[test]
+    fn missing_reauth_snapshot_does_not_block_login_start() {
+        let snapshot = capture_reauth_snapshot(None, "account-a");
+        assert_eq!(snapshot.state(), CredentialOwnerState::Absent);
+        assert_eq!(
+            resolve_credential_transaction(
+                snapshot.state(),
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Commit,
+                false,
+            ),
+            CredentialTransactionResult::Committed(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn reauth_same_identity_commits_new_owner_state() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Commit,
+                false,
+            ),
+            CredentialTransactionResult::Committed(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn reauth_different_identity_restores_previous_owner_state() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn duplicate_add_after_oauth_cleans_unused_owner() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Absent,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Absent)
+        );
+    }
+
+    #[test]
+    fn cancel_before_mutation_leaves_owner_unchanged() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn cancel_after_mutation_rolls_owner_back() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn login_error_after_mutation_rolls_owner_back() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Absent,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Absent)
+        );
+    }
+
+    #[test]
+    fn timeout_after_mutation_rolls_owner_back() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                true,
+            ),
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Present)
+        );
+    }
+
+    #[test]
+    fn rollback_failure_is_explicit() {
+        assert_eq!(
+            resolve_credential_transaction(
+                CredentialOwnerState::Present,
+                CredentialOwnerState::Present,
+                CredentialTransactionDecision::Rollback,
+                false,
+            ),
+            CredentialTransactionResult::RollbackFailed
+        );
+    }
+
+    #[test]
+    fn failed_b_transaction_does_not_change_a_owner_state() {
+        let account_a = CredentialOwnerState::Present;
+        let account_b_result = resolve_credential_transaction(
+            CredentialOwnerState::Present,
+            CredentialOwnerState::Present,
+            CredentialTransactionDecision::Rollback,
+            true,
+        );
+        assert_eq!(account_a, CredentialOwnerState::Present);
+        assert_eq!(
+            account_b_result,
+            CredentialTransactionResult::RolledBack(CredentialOwnerState::Present)
         );
     }
 }

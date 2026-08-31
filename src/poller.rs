@@ -878,6 +878,13 @@ fn parse_rate_limit_headers(response: &ureq::Response) -> UsageData {
     data
 }
 
+pub fn read_codex_usage_for_account(
+    token: &str,
+    account_id: Option<&str>,
+) -> Result<UsageData, PollError> {
+    fetch_codex_usage(token, account_id)
+}
+
 fn fetch_codex_usage(token: &str, account_id: Option<&str>) -> Result<UsageData, PollError> {
     let agent = build_agent()?;
     let mut request = agent
