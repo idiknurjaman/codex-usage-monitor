@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring
 
 **Status:** `in-progress`
-**Current phase:** `03-multi-account-polling`
+**Current phase:** `04-taskbar-ui`
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 **Current product amendment baseline:** `ba7721d2bde2659e18e34db45757a4023dd4ecc8`
@@ -171,7 +171,7 @@ This means the max-four requirement remains mandatory, but Sidik is not required
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 implementation and owner runtime evidence are ready for the Sol final gate; Phases 04–05 remain blocked until their predecessors pass.
+Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 is active; Phase 05 remains blocked until Phase 04 passes.
 
 ## Historical evidence disposition
 
@@ -232,10 +232,10 @@ cargo build --release
 git diff --check
 ```
 
-## Current Phase 03 status and next authorized action
+## Current Phase 04 status and next authorized action
 
 Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; its deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, and Sol has issued a PASS gate.
 
-Phase 03 collection-driven polling implementation and owner-observed runtime evidence are complete for Sol final-gate review. The accepted Phase 02 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
+Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 is authorized for taskbar collection rendering only. The accepted Phase 00–03 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
 
-Do not begin Phase 04 until Sol issues Phase 03 PASS.
+Luna may execute **Phase 04 taskbar UI only** and stop at its Sol final-gate review. Do not begin Phase 05 until Sol issues Phase 04 PASS.

@@ -1,6 +1,6 @@
 # Phase 04 — Taskbar UI
 
-**Status:** `blocked-by-phase-03`
+**Status:** `in-progress — authorized`
 **Goal:** render the account collection cleanly in the existing native taskbar widget, distinguish the runtime current Codex account without clutter, and provide compact account detail through whole-block hover.
 
 ## Preconditions

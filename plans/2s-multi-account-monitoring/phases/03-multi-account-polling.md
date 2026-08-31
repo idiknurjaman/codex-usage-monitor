@@ -1,11 +1,11 @@
 # Phase 03 — Multi-Account Polling
 
-**Status:** `ready-for-sol-final-gate`
+**Status:** `complete/PASS`
 **Goal:** poll the account collection independently, preserve stable attribution and runtime active role, and isolate failures/alerts without account-position hard-coding.
 
 ## Preconditions
 
-Phase 02 amended gate is `PASS` at implementation checkpoint `537b2bbad951ccbb43f04ba9067b55b304f4d232` with deterministic proof checkpoint `2dd532525e48710dd03e4bea37819d052b117fc2`. This phase is authorized; Phase 04 remains blocked.
+Phase 02 amended gate is `PASS` at implementation checkpoint `537b2bbad951ccbb43f04ba9067b55b304f4d232` with deterministic proof checkpoint `2dd532525e48710dd03e4bea37819d052b117fc2`. Phase 03 has now passed its Sol final gate; Phase 04 is authorized by the subsequent plan transition.
 
 The account collection may contain up to four retained identities plus, at full retained capacity, a current-only active identity discovered from normal Codex. Polling code must consume account/capability state rather than assume A/B or slot positions.
 
@@ -104,5 +104,5 @@ When current identity changes:
 Record current tests plus Class R runtime proof of distinct simultaneous account
 values, one-account failure isolation, active-role switch attribution, and a
 four-retained-account Class F/S smoke test in `../EVIDENCE.md` at the exact
-implementation checkpoint. Phase 03 stops here for Sol final-gate review;
-Phase 04 remains blocked.
+implementation checkpoint. Phase 03 stops here after its Sol final gate;
+Phase 04 is authorized by the subsequent plan transition.

@@ -4,7 +4,7 @@
 
 - **Plan:** `2s-multi-account-monitoring`
 - **Lifecycle:** `in-progress`
-- **Current phase:** `03-multi-account-polling`
+- **Current phase:** `04-taskbar-ui`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
@@ -21,7 +21,7 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling is now active; Phase 04 final collection taskbar UI remains out of scope.
+Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling passed its Sol final gate; Phase 04 final collection taskbar UI is now active.
 
 ## Open findings / blockers
 
@@ -456,11 +456,11 @@ Phase 03 implementation starts after this transition commit. No Phase 03 source 
 
 ### Phase 03 — Multi-Account Polling
 
-**Status:** `ready-for-sol-final-gate`
+**Status:** `complete/PASS — Class R + Class F/S`
 
 Implementation checkpoint: `acb870d204d83bcba71534aeab5910784e74b1c1`.
 This is the exact source/test checkpoint for the collection-driven polling
-implementation. Phase 04 remains blocked and has not started.
+implementation. Phase 04 was not started in this checkpoint and is now active after the Sol Phase 03 PASS transition.
 
 #### Class S — source/state-machine proof
 
@@ -566,17 +566,25 @@ behavior was added. The accepted Phase 02 auth mechanism remains direct pinned
 `codex-login` with `Keyring + Secrets`, isolated `monitor-auth/slot-*` owners,
 no normal Codex workspace ownership, and no token copying.
 
-**Decision:** `READY FOR SOL FINAL GATE` — Class R owner runtime PASS bounded,
-plus Class F/S implementation and deterministic proof PASS, all against
+**Decision:** `PASS` — Class R owner runtime PASS bounded, plus Class F/S
+implementation and deterministic proof PASS, all against
 `acb870d204d83bcba71534aeab5910784e74b1c1`. The separate alert-balloon and
-deliberately forced token-expiry runtime events remain unclaimed. Phase 03 is
-the only active phase; Phase 04 has not started.
+deliberately forced token-expiry runtime events remain unclaimed. Sol has
+accepted this Phase 03 evidence and authorized Phase 04.
+
+#### Sol Phase 03 final gate verdict
+
+- **Verdict:** `PASS`
+- **Phase 03:** `complete/PASS`
+- **Implementation checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
+- **Evidence checkpoint:** `a5fff27afbc3fbe2af10fa34d4264a88f4172705`
+- **Next authorized action:** Phase 04 taskbar UI only.
 
 ### Phase 04 — Taskbar UI
 
-**Status:** `blocked-by-phase-03`
+**Status:** `in-progress — authorized`
 
-Evidence pending.
+Implementation and runtime evidence pending at the Phase 04 checkpoint.
 
 ### Phase 05 — Resilience & Acceptance
 
@@ -586,6 +594,6 @@ Evidence pending.
 
 ## Final audit
 
-**Sol verdict:** `NOT READY — plan not executed`
+**Sol verdict:** `Phase 03 PASS; Phase 04 in progress`
 
 Do not change this to PASS until the final implementation checkpoint has current TEST-MATRIX evidence and Sidik runtime acceptance.

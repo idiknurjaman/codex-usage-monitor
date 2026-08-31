@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring — Test Matrix
 
 **Plan:** `2s-multi-account-monitoring`
-**Status:** `Phase 03 ready for Sol final gate; Phase 04 not started`
+**Status:** `Phase 03 PASS; Phase 04 in progress`
 **Product policy:** maximum four retained accounts; collection-driven/N-capable implementation
 
 Evidence must be current to the exact implementation checkpoint under review. Historical PASS results prove only their historical checkpoints and do not prove the amended account model.
