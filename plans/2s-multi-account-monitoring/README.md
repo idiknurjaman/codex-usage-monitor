@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring
 
 **Status:** `in-progress`
-**Current phase:** `01-account-registry`
+**Current phase:** `02-account-login`
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 
@@ -86,7 +86,7 @@ At the authored checkpoint:
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Bar/Circle rendering of two accounts without regressions |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phase 00 has passed its Sol phase gate. Phases 02–05 remain blocked until their preceding phase passes.
+Phases 00 and 01 have passed their Sol phase gates. Phases 03–05 remain blocked until their preceding phase passes.
 
 ## Hard stops
 
@@ -119,4 +119,4 @@ Existing unrelated Clippy warnings may be recorded, but the plan must introduce 
 
 ## Next authorized action
 
-Execute **Phase 01 only**. Do not implement login UI, polling fan-out, account switching, or later phases.
+Execute **Phase 02 only**. Do not implement polling fan-out, account switching, or later phases.

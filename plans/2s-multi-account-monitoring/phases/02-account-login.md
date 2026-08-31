@@ -1,6 +1,6 @@
 # Phase 02 — Account Login & Lifecycle
 
-**Status:** `blocked-by-phase-01`
+**Status:** `in-progress`
 **Goal:** provide explicit Add, Re-authenticate, and Remove flows for monitored Codex accounts without changing the user's active Codex account.
 
 ## User flow

@@ -4,7 +4,7 @@
 
 - **Plan:** `2s-multi-account-monitoring`
 - **Lifecycle:** `in-progress`
-- **Current phase:** `01-account-registry`
+- **Current phase:** `02-account-login`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`
@@ -308,13 +308,13 @@ The controlled A-refresh/B-refresh/deletion interval remains the authoritative m
 
 ### Phase 01 — Account Registry
 
-**Status:** `READY FOR SOL REVIEW`
+**Status:** `complete/PASS`
 
-Implementation and acceptance evidence are recorded below at checkpoint `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`.
+Implementation and acceptance evidence are recorded below at checkpoint `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`. Sol gate verdict: `PASS`.
 
 ### Phase 01 — Account Registry evidence
 
-**Status:** `READY FOR SOL REVIEW`
+**Status:** `complete/PASS`
 
 **Implementation checkpoint:** `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`
 
@@ -365,13 +365,13 @@ When registry metadata is absent, the registry remains empty. The normal active 
 
 No login UI, multi-account login/re-auth lifecycle, polling fan-out, account switching, alert changes, quota/reset changes, or Phase 02 work was added.
 
-**Decision:** `READY FOR SOL REVIEW`. Phase 01 implementation acceptance evidence is complete at the checkpoint above. Sol review is the next gate; Phase 02 and later phases remain blocked.
+**Decision:** `PASS` — Sol Phase 01 gate verdict. Phase 01 implementation acceptance evidence is complete at the checkpoint above. Phase 02 is now authorized; Phase 03 and later phases remain blocked.
 
 ### Phase 02 — Account Login & Lifecycle
 
-**Status:** `blocked-by-phase-01`
+**Status:** `in-progress`
 
-Evidence pending.
+Phase 02 is the active phase. Login UI/lifecycle is in scope; polling fan-out, account switching, and later phases remain out of scope.
 
 ### Phase 03 — Multi-Account Polling
 
