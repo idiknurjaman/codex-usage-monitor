@@ -7,7 +7,7 @@
 - **Current phase:** `01-account-registry`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `9d77849d7844f3a50fbf0f2c5f9765550822da18`
+- **Implementation checkpoint:** `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`
 
 ## Baseline evidence
 
@@ -310,25 +310,25 @@ The controlled A-refresh/B-refresh/deletion interval remains the authoritative m
 
 **Status:** `READY FOR SOL REVIEW`
 
-Implementation and acceptance evidence are recorded below at checkpoint `9d77849d7844f3a50fbf0f2c5f9765550822da18`.
+Implementation and acceptance evidence are recorded below at checkpoint `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`.
 
 ### Phase 01 — Account Registry evidence
 
 **Status:** `READY FOR SOL REVIEW`
 
-**Implementation checkpoint:** `9d77849d7844f3a50fbf0f2c5f9765550822da18`
+**Implementation checkpoint:** `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c`
 
 #### Scope and ownership
 
 - Added `src/account.rs` as the account-domain owner for stable identity projection, typed monitor owner handles, monitored-account metadata, registry ordering, capacity, duplicate validation, and runtime connection/usage fields.
-- `AccountIdentity.id` is independent from `MonitorAuthHandle::{Slot1, Slot2}`. The typed handle serializes as `slot-1`/`slot-2` and maps deterministically to the Phase 00 `auth-spike/slot-1`/`auth-spike/slot-2` namespace keys; no absolute path is persisted.
+- `AccountIdentity.id` is independent from `MonitorAuthHandle::{Slot1, Slot2}`. The typed handle serializes as `slot-1`/`slot-2` and maps deterministically to clean production logical namespace keys `monitor-auth/slot-1`/`monitor-auth/slot-2`; no absolute path is persisted.
 - `window.rs` no longer parses JWTs or opens Codex auth files. It consumes `AccountRegistry::display_initial()` and persists only explicit `AccountRegistryMetadata` through the existing settings path.
 - The existing `poller.rs` Codex credential adapter now projects `account_id`/ID-token claims into `AccountIdentity` in memory. No token is stored in the account model or sent to the renderer.
 - The accepted Phase 00 mechanism remains unchanged: direct pinned `codex-login`, `AuthCredentialsStoreMode::Keyring` with `AuthKeyringBackendKind::Secrets`, isolated credential-owned namespaces, zero inference, and no normal Codex workspace ownership. Phase 01 does not add the production `codex-login` dependency or implement login/lifecycle.
 
 #### Account model and persistence proof
 
-`AccountRegistry` represents zero, one, or two `MonitoredAccount` values. `try_add()` requires a real typed `MonitorAuthHandle`, enforces `MAX_MONITORED_ACCOUNTS = 2`, and rejects duplicate stable `id` values before considering the initial. Vector insertion order is the persisted deterministic order. Two different stable identities may use the same initial.
+`AccountRegistry` represents zero, one, or two `MonitoredAccount` values. `try_add()` requires a real typed `MonitorAuthHandle`, rejects duplicate stable `id` values, rejects duplicate auth owners, and only then applies `MAX_MONITORED_ACCOUNTS = 2`. `from_metadata()` reconstructs through the same validation path. Vector insertion order is the persisted deterministic order. Two different stable identities may use the same initial.
 
 Persisted `MonitoredAccountMetadata` contains only `id`, optional `initial`, `enabled`, and typed `auth_handle`. Runtime `connection_state`, `usage`, `last_success_at`, and `last_error` are not serialized. The focused serialization test verifies that `access_token`, `refresh_token`, `id_token`, email, and absolute path material do not appear in registry metadata.
 
@@ -337,7 +337,7 @@ When registry metadata is absent, the registry remains empty. The normal active 
 #### Tests and build evidence
 
 - `cargo fmt --check`: PASS.
-- `cargo test`: PASS — 40 passed, 0 failed.
+- `cargo test`: PASS — 43 passed, 0 failed.
 - `cargo clippy --all-targets`: PASS exit. Eight pre-existing warnings remain in `poller.rs`/`window.rs`; no new account-domain warning remains.
 - `cargo build --release`: attempted; default `target\release\codex-usage.exe` was locked by running PID `13584` and was not terminated.
 - `CARGO_TARGET_DIR=%TEMP%\codex-usage-phase01-release-target cargo build --release`: PASS — optimized release build.
@@ -348,14 +348,16 @@ When registry metadata is absent, the registry remains empty. The normal active 
 | Requirement | Result | Evidence |
 |---|---|---|
 | Zero/one/two account representation | PASS | `AccountRegistry` model and empty/legacy fallback tests. |
-| Maximum two accounts | PASS | `RegistryError::CapacityReached` test. |
+| Maximum two accounts | PASS | `MAX_MONITORED_ACCOUNTS = 2` and full-registry length assertions. |
 | Stable duplicate identity | PASS | Duplicate `id` rejected regardless of initial. |
+| Unique monitor auth ownership | PASS | `Slot1 + Slot1` rejected in `try_add()` and `from_metadata()`; `Slot1 + Slot2` accepted. |
+| Duplicate classification before capacity | PASS | Full registry reports duplicate identity/owner errors before capacity. |
 | Deterministic persisted ordering | PASS | Vec insertion order round-trips through metadata. |
 | Same-initial accounts | PASS | Two distinct IDs with initial `S` coexist. |
 | Identity ownership outside renderer | PASS | JWT/auth parsing removed from `window.rs`; projection is adapter/domain-owned. |
 | Non-secret settings metadata | PASS | Metadata-only serializer and no credential fields. |
 | Legacy fallback remains ephemeral | PASS | Empty registry + working A displays A; settings round-trip keeps registry empty; working B then displays B. |
-| Typed auth-owner handle | PASS | Slot1/Slot2 round-trip, deterministic namespace keys, and no absolute path serialization. |
+| Typed auth-owner handle | PASS | Slot1/Slot2 round-trip, clean `monitor-auth/*` namespace keys, and no absolute path serialization. |
 | Existing single-account behavior | PASS | Existing window tests pass without persisting the working identity as a monitor account. |
 | Existing usage semantics | PASS | Existing poller semantics tests remain green; no quota/reset/alert changes. |
 
