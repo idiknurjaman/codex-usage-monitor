@@ -7,7 +7,7 @@
 - **Current phase:** `02-account-login`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `99097750a4a97b98e5b2912496bfb782018dd72b`
+- **Implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
 
 ## Baseline evidence
 
@@ -371,7 +371,7 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 **Status:** `READY FOR SOL REVIEW — amended source checkpoint`
 
-Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `99097750a4a97b98e5b2912496bfb782018dd72b`.
+Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
 
 #### Collection-driven account model
 
@@ -394,9 +394,9 @@ Phase 02 is the active phase. The superseded two-account runtime walkthrough is 
 #### Automated acceptance evidence
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 64 passed, 0 failed.
+- `cargo test --locked`: PASS — 66 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing warnings remain in legacy `poller.rs`/`window.rs` code, with no amended account-model warning introduced.
-- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-corrections-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-corrections-target\release\codex-usage.exe`.
+- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-menu-routing-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-menu-routing-target\release\codex-usage.exe`.
 - `git diff --check`: PASS before source checkpoint.
 
 #### Focused regression coverage
@@ -412,17 +412,18 @@ The 62-test suite includes coverage for:
 - direct account labels preferring display name plus runtime `· Active` marker;
 - fifth manual Add preflight disabled at four retained accounts and while lifecycle work is busy;
 - current-account removal suppression/current-only behavior;
+- dynamic Re-auth/Remove command routes remain resolvable after `TrackPopupMenu()` returns and are replaced by the next menu construction without fixed slots;
 - prior transactional missing-reauth, commit, identity-mismatch rollback, cancel, timeout, error, rollback-failure, duplicate cleanup, and cross-account isolation cases.
 
 #### Runtime proof boundary
 
-The amended owner-approved UI/runtime walkthrough has not been run from this implementation checkpoint. The prior A/B walkthrough is explicitly superseded and is not claimed as evidence. The Codex desktop tool runner cannot provide Sidik’s interactive taskbar/browser session, so no real-account PASS is claimed here; runtime proof remains `NOT YET PROVEN` for Sol’s review.
+The amended runtime walkthrough was started against the prior amended binary `99097750...` and found a confirmed dynamic-menu routing defect: after `TrackPopupMenu()` returned, the owner route table had already been cleared, so account Re-authenticate/Remove dispatched as no-ops. Acceptance was stopped immediately; no lifecycle success is claimed from that run. The correction is implemented at `537b2bb...` and has a new release binary, but the amended real-account walkthrough must be restarted against that binary. The prior A/B walkthrough remains superseded and is not claimed as evidence. Runtime acceptance is `NOT YET PROVEN`.
 
 #### Scope guard
 
 Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
 
-**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `99097750a4a97b98e5b2912496bfb782018dd72b`; real-account runtime proof is explicitly open.
+**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `537b2bbad951ccbb43f04ba9067b55b304f4d232`; the confirmed menu-routing correction is verified, while real-account runtime proof remains explicitly open.
 
 ### Phase 03 — Multi-Account Polling
 
