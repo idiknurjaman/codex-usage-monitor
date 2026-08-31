@@ -8,6 +8,7 @@
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
+- **Deterministic proof/test checkpoint:** `2dd532525e48710dd03e4bea37819d052b117fc2`
 
 ## Baseline evidence
 
@@ -369,9 +370,9 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 ### Phase 02 — Account Login & Lifecycle
 
-**Status:** `READY FOR SOL FINAL GATE — runtime partial; fixture limits explicit`
+**Status:** `READY FOR SOL FINAL GATE — Class R + Class F/S proof closure`
 
-Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
+Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `99be80cc3bcaea0bf185c5dd36d9611338fea6ec`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
 
 #### Collection-driven account model
 
@@ -394,26 +395,22 @@ Phase 02 is the active phase. The superseded two-account runtime walkthrough is 
 #### Automated acceptance evidence
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 66 passed, 0 failed.
+- `cargo test --locked`: PASS — 70 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing warnings remain in legacy `poller.rs`/`window.rs` code, with no amended account-model warning introduced.
-- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-menu-routing-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-menu-routing-target\release\codex-usage.exe`.
+- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-proof-closure-release-target"; cargo build --release`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-proof-closure-release-target\release\codex-usage.exe`.
 - `git diff --check`: PASS before source checkpoint.
 
 #### Focused regression coverage
 
-The 66-test suite includes coverage for:
+The 70-test suite includes the following focused Class F/S proof closure tests:
 
-- four-account retention policy and dynamic owner allocation without `Slot1`/`Slot2` type variants;
-- legacy `slot-N` metadata input migrating to serialized `owner-N` while preserving physical `monitor-auth/slot-N` owner continuity for re-auth/remove, with no `auth-spike` or absolute path;
-- automatic identity discovery with ownerless active identity, inactive `ReauthRequired` state, and no working-owner copy;
-- manual duplicate reconciliation attaching an owner to one existing identity and refusing a second owner/row;
-- runtime active-role matching remaining outside persisted metadata;
-- current identity `B` taking precedence over retained registry order `[A, B]` after current usage is recorded, so transitional display cannot show `A` for current `B`;
-- direct account labels preferring display name plus runtime `· Active` marker;
-- fifth manual Add preflight disabled at four retained accounts and while lifecycle work is busy;
-- current-account removal suppression/current-only behavior;
-- dynamic Re-auth/Remove command routes remain resolvable after `TrackPopupMenu()` returns and are replaced by the next menu construction without fixed slots;
-- prior transactional missing-reauth, commit, identity-mismatch rollback, cancel, timeout, error, rollback-failure, duplicate cleanup, and cross-account isolation cases.
+- `account::tests::collection_policy_supports_four_accounts_without_fixed_owner_variants` — Class F: four retained identities and policy capacity without fixed variants;
+- `account::tests::full_capacity_unknown_identity_is_current_only_without_eviction_or_owner_theft` — Class F: unknown E is current-only and A/B/C/D metadata plus owners remain unchanged;
+- `account::tests::freeing_capacity_allows_later_current_identity_retention` — Class F: capacity release permits later reconciliation;
+- `window::tests::fifth_manual_add_is_rejected_before_login_preflight` — Class F/S: retained count four blocks Add before login dispatch;
+- `account::tests::initial_usage_success_is_recorded_against_selected_account_only` — Class S: success is stored against the selected stable identity only;
+- `account::tests::initial_usage_failure_is_scoped_to_selected_account` — Class S: failure becomes selected-account `Unavailable` without affecting another account;
+- existing collection/identity/owner, active-role, current-display, direct-menu, legacy-owner, and transaction tests — Class F/S: collection routing, no persisted active role, owner continuity, and transactional auth safety.
 
 #### Runtime proof boundary
 
@@ -421,30 +418,31 @@ The amended walkthrough was restarted against the corrected binary `C:\Users\SID
 
 Owner-observed runtime results, recorded with account labels only:
 
-| Scenario | Result | Owner-observed evidence |
-|---|---|---|
-| Startup with normal Codex account A | PASS | A was auto-discovered without manual Add and appeared as `A · Active`. |
-| Re-authenticate A | PASS | Browser login completed; no duplicate row was created. |
-| Normal Codex switch A → B | PASS | After Refresh, B appeared active, A remained retained, and no duplicate row appeared. Transitional display followed current B usage rather than retained A. |
-| Manual Add for already-known B while A remained current | PASS | The Add flow completed with two rows only; normal Codex remained A; B was reconciled/attached rather than duplicated. |
-| Restart after A+B | PASS | Both retained rows survived restart and active role was recomputed from current normal Codex. No persisted active field was used. |
-| Re-authenticate inactive B | PASS bounded | Browser re-auth completed; rows remained deduplicated and A/current normal Codex stayed unchanged in the owner-observed UI. Per-owner byte/hash proof is not claimed here. |
-| Remove inactive B | PASS | B was removed; A remained active; normal Codex stayed logged in. |
-| Remove current B | PASS | B remained visible only as current-only while normal Codex was still B; retained Remove was unavailable and no immediate re-retain occurred. After switching normal Codex back to A and Refresh, B disappeared. |
-| Direct account menu actions | PASS | Re-authenticate and Remove dispatched to the selected stable account after menu tracking; this is the corrected route-lifetime behavior. |
-| Bounded initial usage read | NOT PROVEN as independently owner-visible | Manual Add completed and persisted, but transitional Phase 02 UI exposes no separate completion marker. The source/automated one-shot path is present; no independent runtime result is claimed. |
-| Four retained accounts / fifth Add disabled | NOT PROVEN | Only two distinct real accounts are available in this environment; no synthetic accounts were used. |
-| Unknown current-only E at full capacity | NOT PROVEN | Requires a fifth owner-approved real account fixture, which is unavailable. |
+| Scenario | Proof class | Result | Owner-observed evidence |
+|---|---|---|---|
+| Startup with normal Codex account A | Class R | PASS | A was auto-discovered without manual Add and appeared as `A · Active`. |
+| Re-authenticate A | Class R | PASS | Browser login completed; no duplicate row was created. |
+| Normal Codex switch A → B | Class R | PASS | After Refresh, B appeared active, A remained retained, and no duplicate row appeared. Transitional display followed current B usage rather than retained A. |
+| Manual Add for already-known B while A remained current | Class R | PASS | The Add flow completed with two rows only; normal Codex remained A; B was reconciled/attached rather than duplicated. |
+| Restart after A+B | Class R | PASS | Both retained rows survived restart and active role was recomputed from current normal Codex. No persisted active field was used. |
+| Re-authenticate inactive B | Class R | PASS bounded | Browser re-auth completed; rows remained deduplicated and A/current normal Codex stayed unchanged in the owner-observed UI. Per-owner byte/hash proof is not claimed here. |
+| Remove inactive B | Class R | PASS | B was removed; A remained active; normal Codex stayed logged in. |
+| Remove current B | Class R | PASS | B remained visible only as current-only while normal Codex was still B; retained Remove was unavailable and no immediate re-retain occurred. After switching normal Codex back to A and Refresh, B disappeared. |
+| Direct account menu actions | Class R | PASS | Re-authenticate and Remove dispatched to the selected stable account after menu tracking; this is the corrected route-lifetime behavior. |
+| Bounded initial usage read | Class S | PASS | Independently closed by deterministic selected-account success/error recording tests; transitional UI has no separate completion marker. |
+| Four retained accounts / fifth Add disabled | Class F/S | PASS | Deterministic fixture tests prove four coexist and the fifth Add preflight rejects before login dispatch; no synthetic credentials were used. |
+| Unknown current-only E at full capacity | Class F | PASS | Deterministic fixture proves E is current-only, A/B/C/D and owners are unchanged, and no eviction occurs. |
+| Capacity release/reconciliation | Class F | PASS | Deterministic fixture proves freeing one retained entry permits later retention of the current identity. |
 
-Working Codex safety result: `PASS bounded` for the owner-observed lifecycle state—normal Codex remained logged in after monitor removal and monitor actions did not visibly switch/logout the working account. `NOT PROVEN` for hash-identical normal `auth.json`/workspace/session state across this walkthrough because Sidik intentionally switched the normal Codex account during the test; that owner activity changes normal auth state and must not be attributed to the monitor. The prior controlled Phase 00 quiet interval remains the separate accepted proof for stable normal-state markers. No raw token, OAuth code, email, or account ID was recorded in this evidence.
+Working Codex safety result: `Class R — PASS bounded` for the owner-observed lifecycle state—normal Codex remained logged in after monitor removal and monitor actions did not visibly switch/logout the working account. `NOT PROVEN` for hash-identical normal `auth.json`/workspace/session state across this walkthrough because Sidik intentionally switched the normal Codex account during the test; that owner activity changes normal auth state and must not be attributed to the monitor. The prior controlled Phase 00 quiet interval remains the separate accepted proof for stable normal-state markers. No raw token, OAuth code, email, or account ID was recorded in this evidence.
 
-Runtime disposition: `PARTIAL PASS / READY FOR SOL FINAL GATE`. The available two-account runtime requirements passed; max-four and unknown-E requirements remain explicit fixture-limited gaps. The prior A/B walkthrough is superseded and is not used for the amended result.
+Runtime/proof disposition: `Class R PASS` for the available two-account credential-sensitive behavior plus `Class F/S PASS` for the required deterministic cardinality and initial-usage closure. No third/fourth/fifth real account was required or fabricated. The prior A/B walkthrough is superseded except where the current proof contract explicitly preserves its Class R claims.
 
 #### Scope guard
 
 Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
 
-**Decision:** `READY FOR SOL FINAL GATE`. Implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; two-account runtime scenarios are owner-observed PASS, while four-account/unknown-E scenarios are `NOT PROVEN` because no additional real-account fixtures exist. Phase 03 remains blocked.
+**Decision:** `READY FOR SOL FINAL GATE`. Production implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, with 70 tests passing. Class R two-account runtime evidence and Class F/S closure evidence are current. Phase 03 remains blocked.
 
 ### Phase 03 — Multi-Account Polling
 
