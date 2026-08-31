@@ -7,8 +7,8 @@
 - **Current phase:** `03-multi-account-polling`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
-- **Deterministic proof/test checkpoint:** `2dd532525e48710dd03e4bea37819d052b117fc2`
+- **Implementation checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
+- **Deterministic proof/test checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
 
 ## Baseline evidence
 
@@ -456,9 +456,97 @@ Phase 03 implementation starts after this transition commit. No Phase 03 source 
 
 ### Phase 03 — Multi-Account Polling
 
-**Status:** `in-progress — authorized`
+**Status:** `ready-for-sol-final-gate`
 
-Phase 03 is the active phase after the docs-only transition. Evidence pending at the implementation checkpoint.
+Implementation checkpoint: `acb870d204d83bcba71534aeab5910784e74b1c1`.
+This is the exact source/test checkpoint for the collection-driven polling
+implementation. Phase 04 remains blocked and has not started.
+
+#### Class S — source/state-machine proof
+
+- `poller::account_poll_targets()` is the single source-selection seam. It
+  iterates `AccountRegistry::accounts()` and selects `MonitorOwner(handle)`,
+  `WorkingCodex`, or `Unavailable` by stable account identity. It has no
+  account-position branches and treats four as a registry policy, not a data
+  shape.
+- `poller::poll_account_collection()` publishes every result with the stable
+  account id that was selected before I/O. Retained accounts use their own
+  `MonitorAuthHandle`; an ownerless current account uses a direct read of the
+  working Codex credential; an inactive ownerless account is explicitly
+  unavailable. A current-only identity at full capacity is appended without
+  mutating retained metadata or owners.
+- Monitor-owner reads use `AuthManager::auth()` followed by
+  `CodexAuth::get_account_id()`/`get_token()` and the direct usage endpoint.
+  The collection path does not call the legacy `cli_refresh_codex_token()` or
+  `codex exec .` fallback. Working current-only reads are also read-only and
+  do not refresh or switch the normal Codex account.
+- `apply_account_poll_result()` updates only the result's stable account id.
+  Auth/credential failures become account-scoped `ReauthRequired`; transient
+  failures become account-scoped `Unavailable`. Existing usage is retained
+  only with `usage_stale = true`; successful data clears that marker. Missing
+  quota windows remain `None` and never become synthetic zero.
+- Non-Codex providers are polled separately in collection mode, so an
+  account-scoped Codex failure does not widen into a global failure when
+  another account/provider succeeds. Reset scheduling also considers every
+  retained account's session and weekly reset independently.
+- Account alert keys use an opaque hash of the stable account id plus
+  provider, window, threshold, and reset identity. Default UI/evidence data
+  does not expose account ids, email, or credential material.
+
+#### Class F — deterministic fixture proof
+
+The fixture/state tests use only fake stable identities and deterministic
+usage/state values. They do not create OAuth, access tokens, refresh tokens,
+keyring credentials, or synthetic files in production monitor namespaces.
+
+| Focused test | Proof |
+|---|---|
+| `poller::tests::collection_poll_plan_uses_owner_and_working_sources_by_identity` | Four retained identities are planned by collection identity and independent monitor owners; no fixed A/B or position routing. |
+| `poller::tests::collection_poll_plan_marks_inactive_ownerless_account_unavailable` | An inactive ownerless account is unavailable instead of borrowing the active account's source. |
+| `poller::tests::full_capacity_current_identity_is_working_only_without_eviction_or_owner_theft` | A/B/C/D remain unchanged while current-only E is assigned only the working read source at full capacity. |
+| `poller::tests::account_poll_result_application_is_scoped_to_stable_identity` | A healthy result and B auth/network failure update only their matching stable rows. |
+| `account::tests::poll_failure_marks_only_one_account_stale_and_preserves_other_usage` | One account is explicitly stale/unavailable while the other remains connected and usable. |
+| `window::tests::account_quota_alerts_are_opaque_and_deduplicated_per_identity` | Same-window alerts deduplicate independently for two stable identities without raw identity in the key. |
+| Existing `account::tests::initial_usage_success_is_recorded_against_selected_account_only` and `initial_usage_failure_is_scoped_to_selected_account` | Initial usage success/error remains scoped to the selected stable account; other account state is unaffected. |
+| Existing `account::tests::freeing_capacity_allows_later_current_identity_retention` | Reconciliation can retain a current identity after an explicit capacity release. |
+
+#### Class R — real-account runtime boundary
+
+No new real-account walkthrough was run for this source checkpoint. The
+accepted Phase 02 Class R proof remains valid for its two-account lifecycle,
+but it does not prove Phase 03 simultaneous independent polling, per-account
+failure recovery, or account-scoped alert delivery. Those runtime claims are
+explicitly `NOT YET PROVEN` and remain for Sol/Sidik's Phase 03 runtime gate.
+No third/fourth/fifth real account is required by the current proof contract.
+
+#### Verification
+
+- `cargo fmt --check`: PASS.
+- `cargo test --locked`: PASS — 76 passed, 0 failed.
+- `cargo clippy --all-targets --locked`: PASS exit; only the repository's
+  existing clippy warnings remain, with no new Phase 03 warning.
+- `cargo build --release`: PASS — optimized binary at
+  `F:\PROJECT\Webapps\codex-usage-monitor\target\release\codex-usage.exe`.
+- Alternate target build was attempted at
+  `%TEMP%\codex-usage-phase03-polling-release-target`; it stopped with
+  `No space left on device` after compiling dependencies. This is an
+  environment limitation, not a source/build error; the default release build
+  completed successfully.
+- `git diff --check`: PASS.
+
+#### Scope guard and disposition
+
+No login UI, account switching, polling fan-out beyond the collection polling
+seam, final multi-account taskbar renderer, tooltip/ring UI, or Phase 04/05
+behavior was added. The accepted Phase 02 auth mechanism remains direct pinned
+`codex-login` with `Keyring + Secrets`, isolated `monitor-auth/slot-*` owners,
+no normal Codex workspace ownership, and no token copying.
+
+**Decision:** `READY FOR SOL FINAL GATE` — Class S/F implementation and
+deterministic proof are complete at
+`acb870d204d83bcba71534aeab5910784e74b1c1`.
+Class R Phase 03 runtime is not claimed. Phase 03 is the only active phase;
+Phase 04 has not started.
 
 ### Phase 04 — Taskbar UI
 
