@@ -369,7 +369,7 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 ### Phase 02 — Account Login & Lifecycle
 
-**Status:** `READY FOR SOL REVIEW — amended source checkpoint`
+**Status:** `READY FOR SOL FINAL GATE — runtime partial; fixture limits explicit`
 
 Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
 
@@ -401,7 +401,7 @@ Phase 02 is the active phase. The superseded two-account runtime walkthrough is 
 
 #### Focused regression coverage
 
-The 62-test suite includes coverage for:
+The 66-test suite includes coverage for:
 
 - four-account retention policy and dynamic owner allocation without `Slot1`/`Slot2` type variants;
 - legacy `slot-N` metadata input migrating to serialized `owner-N` while preserving physical `monitor-auth/slot-N` owner continuity for re-auth/remove, with no `auth-spike` or absolute path;
@@ -417,13 +417,34 @@ The 62-test suite includes coverage for:
 
 #### Runtime proof boundary
 
-The amended runtime walkthrough was started against the prior amended binary `99097750...` and found a confirmed dynamic-menu routing defect: after `TrackPopupMenu()` returned, the owner route table had already been cleared, so account Re-authenticate/Remove dispatched as no-ops. Acceptance was stopped immediately; no lifecycle success is claimed from that run. The correction is implemented at `537b2bb...` and has a new release binary, but the amended real-account walkthrough must be restarted against that binary. The prior A/B walkthrough remains superseded and is not claimed as evidence. Runtime acceptance is `NOT YET PROVEN`.
+The amended walkthrough was restarted against the corrected binary `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-menu-routing-target\release\codex-usage.exe`. The prior routing defect on `99097750...` is not reused as acceptance evidence.
+
+Owner-observed runtime results, recorded with account labels only:
+
+| Scenario | Result | Owner-observed evidence |
+|---|---|---|
+| Startup with normal Codex account A | PASS | A was auto-discovered without manual Add and appeared as `A · Active`. |
+| Re-authenticate A | PASS | Browser login completed; no duplicate row was created. |
+| Normal Codex switch A → B | PASS | After Refresh, B appeared active, A remained retained, and no duplicate row appeared. Transitional display followed current B usage rather than retained A. |
+| Manual Add for already-known B while A remained current | PASS | The Add flow completed with two rows only; normal Codex remained A; B was reconciled/attached rather than duplicated. |
+| Restart after A+B | PASS | Both retained rows survived restart and active role was recomputed from current normal Codex. No persisted active field was used. |
+| Re-authenticate inactive B | PASS bounded | Browser re-auth completed; rows remained deduplicated and A/current normal Codex stayed unchanged in the owner-observed UI. Per-owner byte/hash proof is not claimed here. |
+| Remove inactive B | PASS | B was removed; A remained active; normal Codex stayed logged in. |
+| Remove current B | PASS | B remained visible only as current-only while normal Codex was still B; retained Remove was unavailable and no immediate re-retain occurred. After switching normal Codex back to A and Refresh, B disappeared. |
+| Direct account menu actions | PASS | Re-authenticate and Remove dispatched to the selected stable account after menu tracking; this is the corrected route-lifetime behavior. |
+| Bounded initial usage read | NOT PROVEN as independently owner-visible | Manual Add completed and persisted, but transitional Phase 02 UI exposes no separate completion marker. The source/automated one-shot path is present; no independent runtime result is claimed. |
+| Four retained accounts / fifth Add disabled | NOT PROVEN | Only two distinct real accounts are available in this environment; no synthetic accounts were used. |
+| Unknown current-only E at full capacity | NOT PROVEN | Requires a fifth owner-approved real account fixture, which is unavailable. |
+
+Working Codex safety result: `PASS bounded` for the owner-observed lifecycle state—normal Codex remained logged in after monitor removal and monitor actions did not visibly switch/logout the working account. `NOT PROVEN` for hash-identical normal `auth.json`/workspace/session state across this walkthrough because Sidik intentionally switched the normal Codex account during the test; that owner activity changes normal auth state and must not be attributed to the monitor. The prior controlled Phase 00 quiet interval remains the separate accepted proof for stable normal-state markers. No raw token, OAuth code, email, or account ID was recorded in this evidence.
+
+Runtime disposition: `PARTIAL PASS / READY FOR SOL FINAL GATE`. The available two-account runtime requirements passed; max-four and unknown-E requirements remain explicit fixture-limited gaps. The prior A/B walkthrough is superseded and is not used for the amended result.
 
 #### Scope guard
 
 Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
 
-**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `537b2bbad951ccbb43f04ba9067b55b304f4d232`; the confirmed menu-routing correction is verified, while real-account runtime proof remains explicitly open.
+**Decision:** `READY FOR SOL FINAL GATE`. Implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; two-account runtime scenarios are owner-observed PASS, while four-account/unknown-E scenarios are `NOT PROVEN` because no additional real-account fixtures exist. Phase 03 remains blocked.
 
 ### Phase 03 — Multi-Account Polling
 
