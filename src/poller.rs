@@ -224,6 +224,161 @@ pub fn poll(
     )
 }
 
+/// The credential source selected for one stable account during a poll cycle.
+/// Active-role presentation is intentionally not part of this decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountPollSource {
+    MonitorOwner(crate::account::MonitorAuthHandle),
+    WorkingCodex,
+    Unavailable,
+}
+
+#[derive(Clone, Debug)]
+pub struct AccountPollTarget {
+    pub account_id: String,
+    pub source: AccountPollSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountPollError {
+    NoIndependentOwner,
+    Poll(PollError),
+}
+
+impl AccountPollError {
+    pub fn category(self) -> &'static str {
+        match self {
+            Self::NoIndependentOwner => "no_independent_owner",
+            Self::Poll(error) => error.category(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AccountPollResult {
+    pub account_id: String,
+    pub source: AccountPollSource,
+    pub result: Result<UsageData, AccountPollError>,
+}
+
+/// Poll only the non-Codex providers. This is the collection-mode companion
+/// to `poll`; it prevents the legacy single-account Codex fallback from being
+/// entered while retained account owners are being polled.
+pub fn poll_non_codex(
+    show_claude_code: bool,
+    show_antigravity: bool,
+) -> Result<AppUsageData, PollError> {
+    poll_with(
+        show_claude_code,
+        false,
+        show_antigravity,
+        poll_claude_code,
+        || Err(PollError::RequestFailed),
+        poll_antigravity,
+    )
+}
+
+/// Produce the account polling plan without performing I/O. Keeping this
+/// seam pure makes owner selection and current-only overflow deterministic to
+/// test without creating synthetic credentials.
+pub fn account_poll_targets(
+    registry: &crate::account::AccountRegistry,
+    current_identity: Option<&crate::account::AccountIdentity>,
+) -> Vec<AccountPollTarget> {
+    let current_id = current_identity.map(|identity| identity.id.as_str());
+    let mut targets = registry
+        .accounts()
+        .iter()
+        .map(|account| {
+            let source = match (account.auth_handle, current_id == Some(account.id.as_str())) {
+                (Some(handle), _) => AccountPollSource::MonitorOwner(handle),
+                (None, true) => AccountPollSource::WorkingCodex,
+                (None, false) => AccountPollSource::Unavailable,
+            };
+            AccountPollTarget {
+                account_id: account.id.clone(),
+                source,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(identity) = current_identity {
+        if registry.account_by_id(&identity.id).is_none() {
+            targets.push(AccountPollTarget {
+                account_id: identity.id.clone(),
+                source: AccountPollSource::WorkingCodex,
+            });
+        }
+    }
+
+    targets
+}
+
+/// Poll every effective account from the collection. Each result retains its
+/// stable account id so callers can update only the account that succeeded or
+/// failed. No refresh or inference fallback is available on this path.
+pub fn poll_account_collection(
+    registry: &crate::account::AccountRegistry,
+    current_identity: Option<&crate::account::AccountIdentity>,
+) -> Vec<AccountPollResult> {
+    account_poll_targets(registry, current_identity)
+        .into_iter()
+        .map(|target| {
+            let result = match target.source {
+                AccountPollSource::MonitorOwner(handle) => {
+                    crate::account::read_monitor_usage_for_account(handle, &target.account_id)
+                        .map_err(AccountPollError::Poll)
+                }
+                AccountPollSource::WorkingCodex => {
+                    read_working_codex_usage_for_account(&target.account_id)
+                        .map_err(AccountPollError::Poll)
+                }
+                AccountPollSource::Unavailable => Err(AccountPollError::NoIndependentOwner),
+            };
+            AccountPollResult {
+                account_id: target.account_id,
+                source: target.source,
+                result,
+            }
+        })
+        .collect()
+}
+
+/// Publish one account result without widening a failure to the rest of the
+/// collection. Usage remains available to a later renderer only when it is
+/// explicitly marked stale by the registry.
+pub fn apply_account_poll_result(
+    registry: &mut crate::account::AccountRegistry,
+    result: &AccountPollResult,
+) {
+    debug_assert!(
+        !matches!(result.source, AccountPollSource::Unavailable)
+            || matches!(&result.result, Err(AccountPollError::NoIndependentOwner))
+    );
+    match &result.result {
+        Ok(usage) => {
+            registry.record_usage(&result.account_id, usage.clone());
+        }
+        Err(AccountPollError::NoIndependentOwner) => {
+            registry.record_reauth_required(
+                &result.account_id,
+                AccountPollError::NoIndependentOwner.category(),
+            );
+        }
+        Err(AccountPollError::Poll(error))
+            if matches!(
+                error,
+                PollError::AuthRequired | PollError::NoCredentials | PollError::TokenExpired
+            ) =>
+        {
+            registry.record_reauth_required(&result.account_id, error.category());
+        }
+        Err(AccountPollError::Poll(error)) => {
+            registry.record_usage_error(&result.account_id, error.category());
+        }
+    }
+}
+
 /// Whether Claude Code CLI credentials are available from a supported source.
 /// Claude Desktop authentication is intentionally not treated as CLI access.
 pub fn claude_code_credentials_available() -> bool {
@@ -883,6 +1038,22 @@ pub fn read_codex_usage_for_account(
     account_id: Option<&str>,
 ) -> Result<UsageData, PollError> {
     fetch_codex_usage(token, account_id)
+}
+
+fn read_working_codex_usage_for_account(expected_account_id: &str) -> Result<UsageData, PollError> {
+    let credentials = read_codex_credentials().ok_or(PollError::NoCredentials)?;
+    let identity = crate::account::from_codex_auth_projection(
+        credentials.account_id.clone(),
+        credentials.id_token.as_deref(),
+    )
+    .ok_or(PollError::AuthRequired)?;
+    if identity.id != expected_account_id {
+        return Err(PollError::AuthRequired);
+    }
+
+    // This is intentionally a read-only working-Codex path. It never invokes
+    // the legacy `codex exec .` refresh fallback.
+    fetch_codex_usage(&credentials.access_token, credentials.account_id.as_deref())
 }
 
 fn fetch_codex_usage(token: &str, account_id: Option<&str>) -> Result<UsageData, PollError> {
@@ -1803,6 +1974,151 @@ mod tests {
             },
             weekly: UsageSection::default(),
         }
+    }
+
+    fn account_identity(id: &str, display_name: &str) -> crate::account::AccountIdentity {
+        crate::account::AccountIdentity {
+            id: id.to_string(),
+            display_name: Some(display_name.to_string()),
+            username: None,
+            email: None,
+        }
+    }
+
+    fn owner(index: u32) -> crate::account::MonitorAuthHandle {
+        crate::account::MonitorAuthHandle::new(index).unwrap()
+    }
+
+    #[test]
+    fn collection_poll_plan_uses_owner_and_working_sources_by_identity() {
+        let mut registry = crate::account::AccountRegistry::empty();
+        for (id, name, handle) in [
+            ("account-a", "Alice", owner(1)),
+            ("account-b", "Bob", owner(2)),
+            ("account-c", "Carol", owner(3)),
+            ("account-d", "Drew", owner(4)),
+        ] {
+            registry
+                .try_add(crate::account::MonitoredAccount::from_identity(
+                    &account_identity(id, name),
+                    Some(handle),
+                ))
+                .unwrap();
+        }
+
+        let targets = account_poll_targets(&registry, Some(&account_identity("account-b", "Bob")));
+
+        assert_eq!(targets.len(), 4);
+        assert_eq!(targets[0].account_id, "account-a");
+        assert_eq!(targets[0].source, AccountPollSource::MonitorOwner(owner(1)));
+        assert_eq!(targets[1].account_id, "account-b");
+        assert_eq!(targets[1].source, AccountPollSource::MonitorOwner(owner(2)));
+        assert_eq!(targets[2].source, AccountPollSource::MonitorOwner(owner(3)));
+        assert_eq!(targets[3].source, AccountPollSource::MonitorOwner(owner(4)));
+    }
+
+    #[test]
+    fn collection_poll_plan_marks_inactive_ownerless_account_unavailable() {
+        let mut registry = crate::account::AccountRegistry::empty();
+        registry
+            .try_add(crate::account::MonitoredAccount::from_identity(
+                &account_identity("account-a", "Alice"),
+                None,
+            ))
+            .unwrap();
+        registry
+            .try_add(crate::account::MonitoredAccount::from_identity(
+                &account_identity("account-b", "Bob"),
+                Some(owner(2)),
+            ))
+            .unwrap();
+
+        let targets = account_poll_targets(&registry, Some(&account_identity("account-b", "Bob")));
+
+        assert_eq!(targets[0].source, AccountPollSource::Unavailable);
+        assert_eq!(targets[1].source, AccountPollSource::MonitorOwner(owner(2)));
+    }
+
+    #[test]
+    fn full_capacity_current_identity_is_working_only_without_eviction_or_owner_theft() {
+        let mut registry = crate::account::AccountRegistry::empty();
+        for index in 1..=crate::account::MAX_RETAINED_ACCOUNTS {
+            registry
+                .try_add(crate::account::MonitoredAccount::from_identity(
+                    &account_identity(&format!("account-{index}"), "Retained"),
+                    Some(owner(index as u32)),
+                ))
+                .unwrap();
+        }
+        let before = registry.metadata();
+
+        let targets = account_poll_targets(&registry, Some(&account_identity("account-e", "Eve")));
+
+        assert_eq!(targets.len(), crate::account::MAX_RETAINED_ACCOUNTS + 1);
+        assert_eq!(targets.last().unwrap().account_id, "account-e");
+        assert_eq!(
+            targets.last().unwrap().source,
+            AccountPollSource::WorkingCodex
+        );
+        assert_eq!(registry.metadata(), before);
+        assert!(registry
+            .accounts()
+            .iter()
+            .all(|account| account.auth_handle.is_some()));
+    }
+
+    #[test]
+    fn account_poll_result_application_is_scoped_to_stable_identity() {
+        let mut registry = crate::account::AccountRegistry::empty();
+        registry
+            .try_add(crate::account::MonitoredAccount::from_identity(
+                &account_identity("account-a", "Alice"),
+                Some(owner(1)),
+            ))
+            .unwrap();
+        registry
+            .try_add(crate::account::MonitoredAccount::from_identity(
+                &account_identity("account-b", "Bob"),
+                Some(owner(2)),
+            ))
+            .unwrap();
+
+        let mut healthy_usage = UsageData::default();
+        healthy_usage.session.used_percentage = Some(31.0);
+        let healthy = AccountPollResult {
+            account_id: "account-a".to_string(),
+            source: AccountPollSource::MonitorOwner(owner(1)),
+            result: Ok(healthy_usage),
+        };
+        let failed = AccountPollResult {
+            account_id: "account-b".to_string(),
+            source: AccountPollSource::MonitorOwner(owner(2)),
+            result: Err(AccountPollError::Poll(PollError::NetworkUnavailable)),
+        };
+
+        apply_account_poll_result(&mut registry, &healthy);
+        apply_account_poll_result(&mut registry, &failed);
+
+        assert_eq!(
+            registry.accounts()[0].connection_state,
+            crate::account::ConnectionState::Connected
+        );
+        assert_eq!(
+            registry.accounts()[0]
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.session.used_percentage),
+            Some(31.0)
+        );
+        assert_eq!(
+            registry.accounts()[1].connection_state,
+            crate::account::ConnectionState::Unavailable
+        );
+        assert!(!registry.accounts()[1].usage_stale);
+        assert_eq!(
+            registry.accounts()[1].last_error.as_deref(),
+            Some("network_unavailable")
+        );
     }
 
     #[test]

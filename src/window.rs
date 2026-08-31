@@ -608,6 +608,21 @@ struct QuotaAlert {
 }
 
 fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<QuotaAlert> {
+    collect_low_quota_alerts_for_data(state, data, true)
+}
+
+fn collect_low_quota_alerts_without_codex(
+    state: &mut AppState,
+    data: &AppUsageData,
+) -> Vec<QuotaAlert> {
+    collect_low_quota_alerts_for_data(state, data, false)
+}
+
+fn collect_low_quota_alerts_for_data(
+    state: &mut AppState,
+    data: &AppUsageData,
+    include_codex: bool,
+) -> Vec<QuotaAlert> {
     let threshold = state.alert_threshold_percent;
     if threshold == 0 {
         return Vec::new();
@@ -630,7 +645,7 @@ fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<Qu
             );
         }
     }
-    if state.show_codex {
+    if include_codex && state.show_codex {
         if let Some(usage) = data.codex.as_ref() {
             append_provider_alerts(
                 &mut alerts,
@@ -661,6 +676,29 @@ fn collect_low_quota_alerts(state: &mut AppState, data: &AppUsageData) -> Vec<Qu
         }
     }
     alerts
+}
+
+fn append_account_quota_alerts(
+    alerts: &mut Vec<QuotaAlert>,
+    notified: &mut BTreeSet<String>,
+    threshold: u8,
+    language: LanguageId,
+    account_id: &str,
+    usage: &crate::models::UsageData,
+    strings: Strings,
+) {
+    let provider_key = format!("account:{}:codex", account::opaque_account_key(account_id));
+    append_provider_alerts(
+        alerts,
+        notified,
+        threshold,
+        language,
+        tray_icon::TrayIconKind::Codex,
+        &provider_key,
+        strings.codex_model,
+        usage,
+        strings,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -720,7 +758,7 @@ fn append_quota_alert(
         .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
         .map(|value| value.as_secs().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let key = format!("{prefix}{reset_key}");
+    let key = format!("{prefix}{threshold}:{reset_key}");
     notified.retain(|existing| !existing.starts_with(&prefix) || existing == &key);
 
     let Some(used_percentage) = section.used_percentage else {
@@ -2551,6 +2589,106 @@ fn reconcile_working_identity(identity: Option<account::AccountIdentity>) -> (bo
     (registry_changed, identity_changed)
 }
 
+fn poll_collection(
+    registry: &account::AccountRegistry,
+    current_identity: Option<&account::AccountIdentity>,
+    show_claude_code: bool,
+    show_antigravity: bool,
+) -> (
+    Result<AppUsageData, poller::PollError>,
+    Vec<poller::AccountPollResult>,
+) {
+    let account_results = poller::poll_account_collection(registry, current_identity);
+    let non_codex_result = if show_claude_code || show_antigravity {
+        Some(poller::poll_non_codex(show_claude_code, show_antigravity))
+    } else {
+        None
+    };
+    let non_codex_error = non_codex_result
+        .as_ref()
+        .and_then(|result| result.as_ref().err().copied());
+    let non_codex_data = non_codex_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok());
+
+    // The transitional widget has one Codex display. Prefer the runtime
+    // current identity, falling back to the first retained account only when
+    // no working identity is available. Collection results remain attached
+    // to every account independently.
+    let display_account_id = current_identity
+        .map(|identity| identity.id.as_str())
+        .or_else(|| {
+            registry
+                .accounts()
+                .first()
+                .map(|account| account.id.as_str())
+        });
+    let codex = display_account_id.and_then(|account_id| {
+        account_results
+            .iter()
+            .find(|result| result.account_id == account_id)
+            .and_then(|result| result.result.as_ref().ok().cloned())
+    });
+
+    let data = AppUsageData {
+        claude_code: non_codex_data.and_then(|data| data.claude_code.clone()),
+        codex,
+        antigravity: non_codex_data.and_then(|data| data.antigravity.clone()),
+    };
+    let any_success = data.claude_code.is_some()
+        || data.codex.is_some()
+        || data.antigravity.is_some()
+        || account_results.iter().any(|result| result.result.is_ok());
+    let account_error = account_results
+        .iter()
+        .find_map(|result| match result.result {
+            Err(poller::AccountPollError::Poll(error)) => Some(error),
+            Err(poller::AccountPollError::NoIndependentOwner) => {
+                Some(poller::PollError::NoCredentials)
+            }
+            Ok(_) => None,
+        });
+    let first_error = non_codex_error.or(account_error);
+
+    (
+        if any_success {
+            Ok(data)
+        } else {
+            Err(first_error.unwrap_or(poller::PollError::RequestFailed))
+        },
+        account_results,
+    )
+}
+
+fn registry_is_past_reset(registry: &account::AccountRegistry) -> bool {
+    registry
+        .accounts()
+        .iter()
+        .any(|account| account.usage.as_ref().is_some_and(poller::is_past_reset))
+}
+
+fn apply_account_poll_results(
+    state: &mut AppState,
+    results: &[poller::AccountPollResult],
+    quota_alerts: &mut Vec<QuotaAlert>,
+) {
+    let strings = state.language.strings();
+    for result in results {
+        poller::apply_account_poll_result(&mut state.account_registry, result);
+        if let Ok(usage) = &result.result {
+            append_account_quota_alerts(
+                quota_alerts,
+                &mut state.notified_quota_windows,
+                state.alert_threshold_percent,
+                state.language,
+                &result.account_id,
+                usage,
+                strings,
+            );
+        }
+    }
+}
+
 fn do_poll(send_hwnd: SendHwnd) {
     let hwnd = send_hwnd.to_hwnd();
     let (show_claude_code, show_codex, show_antigravity) = {
@@ -2572,11 +2710,38 @@ fn do_poll(send_hwnd: SendHwnd) {
         sync_tray_icons(hwnd);
     }
 
-    match poller::poll(show_claude_code, show_codex, show_antigravity) {
+    let collection_context = {
+        let state = lock_state();
+        state.as_ref().and_then(|state| {
+            (show_codex
+                && (!state.account_registry.is_empty() || state.current_working_identity.is_some()))
+            .then(|| {
+                (
+                    state.account_registry.clone(),
+                    state.current_working_identity.clone(),
+                )
+            })
+        })
+    };
+    let (poll_result, account_results) = match collection_context {
+        Some((registry, current_identity)) => poll_collection(
+            &registry,
+            current_identity.as_ref(),
+            show_claude_code,
+            show_antigravity,
+        ),
+        None => (
+            poller::poll(show_claude_code, show_codex, show_antigravity),
+            Vec::new(),
+        ),
+    };
+
+    match poll_result {
         Ok(data) => {
             let mut state = lock_state();
             let mut quota_alerts = Vec::new();
             if let Some(s) = state.as_mut() {
+                apply_account_poll_results(s, &account_results, &mut quota_alerts);
                 if let Some(claude_code) = data.claude_code.as_ref() {
                     s.session_percent = claude_code.session.used_percentage;
                     s.weekly_percent = claude_code.weekly.used_percentage;
@@ -2587,8 +2752,10 @@ fn do_poll(send_hwnd: SendHwnd) {
                 if let Some(codex) = data.codex.as_ref() {
                     s.codex_session_percent = codex.session.used_percentage;
                     s.codex_weekly_percent = codex.weekly.used_percentage;
-                    if let Some(identity) = s.current_working_identity.as_ref() {
-                        s.account_registry.record_usage(&identity.id, codex.clone());
+                    if account_results.is_empty() {
+                        if let Some(identity) = s.current_working_identity.as_ref() {
+                            s.account_registry.record_usage(&identity.id, codex.clone());
+                        }
                     }
                 } else if s.show_codex {
                     s.codex_session_percent = None;
@@ -2602,13 +2769,19 @@ fn do_poll(send_hwnd: SendHwnd) {
                     s.antigravity_weekly_percent = None;
                 }
                 // Stop fast-poll if reset data is now fresh
-                if !poller::app_is_past_reset(&data) {
+                if !poller::app_is_past_reset(&data)
+                    && (account_results.is_empty() || !registry_is_past_reset(&s.account_registry))
+                {
                     unsafe {
                         let _ = KillTimer(hwnd, TIMER_RESET_POLL);
                     }
                 }
 
-                quota_alerts = collect_low_quota_alerts(s, &data);
+                if account_results.is_empty() {
+                    quota_alerts.extend(collect_low_quota_alerts(s, &data));
+                } else {
+                    quota_alerts.extend(collect_low_quota_alerts_without_codex(s, &data));
+                }
                 s.data = Some(data);
                 s.last_poll_ok = true;
                 refresh_usage_texts(s);
@@ -2644,6 +2817,13 @@ fn do_poll(send_hwnd: SendHwnd) {
             }
         }
         Err(e) => {
+            if !account_results.is_empty() {
+                let mut state = lock_state();
+                if let Some(state) = state.as_mut() {
+                    let mut ignored_alerts = Vec::new();
+                    apply_account_poll_results(state, &account_results, &mut ignored_alerts);
+                }
+            }
             let auth_watch = match e {
                 poller::PollError::AuthRequired | poller::PollError::TokenExpired
                     if show_antigravity && !show_claude_code && !show_codex =>
@@ -2797,7 +2977,7 @@ fn schedule_countdown_timer() {
         }
     }
 
-    let delays = [
+    let mut delays = vec![
         data.claude_code
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.session.resets_at)),
@@ -2817,6 +2997,12 @@ fn schedule_countdown_timer() {
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.weekly.resets_at)),
     ];
+    for account in s.account_registry.accounts() {
+        if let Some(usage) = account.usage.as_ref() {
+            delays.push(poller::time_until_display_change(usage.session.resets_at));
+            delays.push(poller::time_until_display_change(usage.weekly.resets_at));
+        }
+    }
     let min_delay = delays.into_iter().flatten().min();
 
     let ms = min_delay
@@ -5818,5 +6004,59 @@ mod tests {
             ),
             "--"
         );
+    }
+
+    #[test]
+    fn account_quota_alerts_are_opaque_and_deduplicated_per_identity() {
+        let mut alerts = Vec::new();
+        let mut notified = BTreeSet::new();
+        let usage = crate::models::UsageData {
+            session: crate::models::UsageSection {
+                used_percentage: Some(85.0),
+                resets_at: Some(UNIX_EPOCH + Duration::from_secs(2_000_000_000)),
+            },
+            weekly: crate::models::UsageSection::default(),
+        };
+        let strings = LanguageId::English.strings();
+
+        append_account_quota_alerts(
+            &mut alerts,
+            &mut notified,
+            20,
+            LanguageId::English,
+            "account-a",
+            &usage,
+            strings,
+        );
+        append_account_quota_alerts(
+            &mut alerts,
+            &mut notified,
+            20,
+            LanguageId::English,
+            "account-b",
+            &usage,
+            strings,
+        );
+        append_account_quota_alerts(
+            &mut alerts,
+            &mut notified,
+            20,
+            LanguageId::English,
+            "account-a",
+            &usage,
+            strings,
+        );
+
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(notified.len(), 2);
+        assert!(notified
+            .iter()
+            .all(|key| !key.contains("account-a") && !key.contains("account-b")));
+        assert!(notified
+            .iter()
+            .any(|key| key.contains(&account::opaque_account_key("account-a"))));
+        assert!(notified
+            .iter()
+            .any(|key| key.contains(&account::opaque_account_key("account-b"))));
     }
 }

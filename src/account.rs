@@ -199,6 +199,7 @@ pub struct MonitoredAccount {
     pub auth_handle: Option<MonitorAuthHandle>,
     pub connection_state: ConnectionState,
     pub usage: Option<UsageData>,
+    pub usage_stale: bool,
     pub last_success_at: Option<SystemTime>,
     pub last_error: Option<String>,
 }
@@ -218,6 +219,7 @@ impl MonitoredAccount {
                 ConnectionState::ReauthRequired
             },
             usage: None,
+            usage_stale: false,
             last_success_at: None,
             last_error: None,
         }
@@ -235,6 +237,7 @@ impl MonitoredAccount {
             auth_handle,
             connection_state: ConnectionState::Connected,
             usage: None,
+            usage_stale: false,
             last_success_at: None,
             last_error: None,
         }
@@ -388,6 +391,7 @@ impl AccountRegistry {
                     active_identity.and_then(|identity| identity.display_name.clone());
             } else if account.auth_handle.is_none() {
                 account.connection_state = ConnectionState::ReauthRequired;
+                account.usage_stale = account.usage.is_some();
             }
         }
     }
@@ -429,6 +433,7 @@ impl AccountRegistry {
         };
         account.connection_state = ConnectionState::Connected;
         account.usage = Some(usage);
+        account.usage_stale = false;
         account.last_success_at = Some(SystemTime::now());
         account.last_error = None;
         true
@@ -443,6 +448,21 @@ impl AccountRegistry {
             return false;
         };
         account.connection_state = ConnectionState::Unavailable;
+        account.usage_stale = account.usage.is_some();
+        account.last_error = Some(error.to_string());
+        true
+    }
+
+    pub fn record_reauth_required(&mut self, account_id: &str, error: &str) -> bool {
+        let Some(account) = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.id == account_id)
+        else {
+            return false;
+        };
+        account.connection_state = ConnectionState::ReauthRequired;
+        account.usage_stale = account.usage.is_some();
         account.last_error = Some(error.to_string());
         true
     }
@@ -1048,6 +1068,42 @@ pub fn read_initial_usage(handle: MonitorAuthHandle) -> Result<UsageData, LoginE
     })
 }
 
+/// Read usage through one monitor-owned Codex auth namespace. `auth()` is the
+/// Codex-managed refresh boundary; the bearer token remains in memory and is
+/// sent only to the usage endpoint. The resolved identity is checked before
+/// publishing usage for the requested stable account.
+pub fn read_monitor_usage_for_account(
+    handle: MonitorAuthHandle,
+    expected_account_id: &str,
+) -> Result<UsageData, crate::poller::PollError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| crate::poller::PollError::RequestFailed)?;
+    runtime.block_on(async move {
+        let manager = auth_manager(handle)
+            .await
+            .map_err(|_| crate::poller::PollError::NoCredentials)?;
+        let auth = manager
+            .auth()
+            .await
+            .ok_or(crate::poller::PollError::NoCredentials)?;
+        let token_data = auth
+            .get_token_data()
+            .map_err(|_| crate::poller::PollError::AuthRequired)?;
+        let identity =
+            from_codex_auth_projection(auth.get_account_id(), Some(&token_data.id_token.raw_jwt))
+                .ok_or(crate::poller::PollError::AuthRequired)?;
+        if identity.id != expected_account_id {
+            return Err(crate::poller::PollError::AuthRequired);
+        }
+        let token = auth
+            .get_token()
+            .map_err(|_| crate::poller::PollError::AuthRequired)?;
+        crate::poller::read_codex_usage_for_account(&token, auth.get_account_id().as_deref())
+    })
+}
+
 fn run_initial_usage_read(handle: MonitorAuthHandle) -> Result<UsageData, LoginError> {
     read_initial_usage(handle)
 }
@@ -1110,6 +1166,12 @@ fn opaque_identity_id(value: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// Stable opaque key for persisted alert deduplication. The stable account id
+/// participates in the key without exposing it in settings or diagnostics.
+pub fn opaque_account_key(account_id: &str) -> String {
+    opaque_identity_id(account_id)
 }
 
 fn first_uppercase_initial(value: Option<&str>) -> Option<char> {
@@ -1606,6 +1668,36 @@ mod tests {
         assert_eq!(
             registry.accounts()[1].last_error.as_deref(),
             Some("initial_usage_unavailable")
+        );
+    }
+
+    #[test]
+    fn poll_failure_marks_only_one_account_stale_and_preserves_other_usage() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored("account-a", Some("Alice"), handle(1)))
+            .unwrap();
+        registry
+            .try_add(monitored("account-b", Some("Bob"), handle(2)))
+            .unwrap();
+
+        let mut usage = UsageData::default();
+        usage.session.used_percentage = Some(27.0);
+        assert!(registry.record_usage("account-a", usage.clone()));
+        assert!(registry.record_usage("account-b", usage));
+
+        assert!(registry.record_usage_error("account-b", "network_unavailable"));
+        assert!(!registry.accounts()[0].usage_stale);
+        assert!(registry.accounts()[1].usage_stale);
+        assert!(registry.accounts()[0].usage.is_some());
+        assert!(registry.accounts()[1].usage.is_some());
+        assert_eq!(
+            registry.accounts()[0].connection_state,
+            ConnectionState::Connected
+        );
+        assert_eq!(
+            registry.accounts()[1].connection_state,
+            ConnectionState::Unavailable
         );
     }
 
