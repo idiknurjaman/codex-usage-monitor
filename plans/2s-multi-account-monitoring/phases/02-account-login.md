@@ -1,6 +1,6 @@
 # Phase 02 — Account Login & Lifecycle
 
-**Status:** `in-progress — amended proof closure`
+**Status:** `complete/PASS — amended proof contract`
 **Goal:** reconcile the account model to collection-driven max-four retention, automatically discover the current working Codex identity, and provide safe manual add/re-auth/remove flows without changing the user's active Codex account.
 
 ## Current authority
@@ -245,4 +245,4 @@ Before Phase 02 can pass:
 6. update `../EVIDENCE.md` accordingly;
 7. stop at `Phase 02 — READY FOR SOL FINAL GATE`.
 
-Phase 03 remains blocked until Sol reviews the fixture proof and issues Phase 02 PASS.
+Sol Phase 02 gate verdict: `PASS`. Phase 03 is now authorized; polling fan-out remains owned by Phase 03 and later UI work remains blocked.

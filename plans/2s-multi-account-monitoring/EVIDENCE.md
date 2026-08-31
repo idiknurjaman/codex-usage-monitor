@@ -4,7 +4,7 @@
 
 - **Plan:** `2s-multi-account-monitoring`
 - **Lifecycle:** `in-progress`
-- **Current phase:** `02-account-login`
+- **Current phase:** `03-multi-account-polling`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
@@ -21,7 +21,7 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-The amended Phase 02 account model is implemented at the checkpoint above. Phase 03 recurring multi-account polling and Phase 04 final collection taskbar UI remain out of scope.
+Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling is now active; Phase 04 final collection taskbar UI remains out of scope.
 
 ## Open findings / blockers
 
@@ -370,9 +370,9 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 ### Phase 02 — Account Login & Lifecycle
 
-**Status:** `READY FOR SOL FINAL GATE — Class R + Class F/S proof closure`
+**Status:** `complete/PASS — Class R + Class F/S proof closure`
 
-Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `99be80cc3bcaea0bf185c5dd36d9611338fea6ec`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
+Phase 02 is complete. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `99be80cc3bcaea0bf185c5dd36d9611338fea6ec`; implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
 
 #### Collection-driven account model
 
@@ -440,15 +440,25 @@ Runtime/proof disposition: `Class R PASS` for the available two-account credenti
 
 #### Scope guard
 
-Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
+Phase 03 implementation starts after this transition commit. No Phase 03 source behavior, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior is included in the Phase 02 checkpoint.
 
-**Decision:** `READY FOR SOL FINAL GATE`. Production implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, with 70 tests passing. Class R two-account runtime evidence and Class F/S closure evidence are current. Phase 03 remains blocked.
+**Decision:** `PASS` — Sol Phase 02 gate. Production implementation checkpoint is `537b2bbad951ccbb43f04ba9067b55b304f4d232`; deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, with 70 tests passing. Class R two-account runtime evidence and Class F/S closure evidence are current. Phase 03 is authorized.
+
+#### Sol Phase 02 gate verdict
+
+- **Verdict:** `PASS`
+- **Phase 02:** `complete/PASS`
+- **Production implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
+- **Deterministic proof/test checkpoint:** `2dd532525e48710dd03e4bea37819d052b117fc2`
+- **Evidence checkpoint:** `214cccfa72a1ea0e51ed270762c8aa588e9333aa`
+- **Approved proof contract:** Class R for available real-account credential-sensitive behavior; Class F/S for non-secret collection/capacity/state seams.
+- **Next authorized action:** Phase 03 multi-account polling only.
 
 ### Phase 03 — Multi-Account Polling
 
-**Status:** `blocked-by-phase-02`
+**Status:** `in-progress — authorized`
 
-Evidence pending.
+Phase 03 is the active phase after the docs-only transition. Evidence pending at the implementation checkpoint.
 
 ### Phase 04 — Taskbar UI
 
