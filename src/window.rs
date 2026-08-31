@@ -22,8 +22,8 @@ use crate::diagnose;
 use crate::localization::{self, LanguageId, Strings};
 use crate::models::AppUsageData;
 use crate::native_interop::{
-    self, Color, TIMER_COUNTDOWN, TIMER_POLL, TIMER_RESET_POLL, TIMER_UPDATE_CHECK, WM_APP_TRAY,
-    WM_APP_USAGE_UPDATED,
+    self, Color, TIMER_ACCOUNT_LIFECYCLE, TIMER_COUNTDOWN, TIMER_POLL, TIMER_RESET_POLL,
+    TIMER_UPDATE_CHECK, WM_APP_TRAY, WM_APP_USAGE_UPDATED,
 };
 use crate::poller;
 use crate::theme;
@@ -67,6 +67,8 @@ struct AppState {
     widget_style: WidgetStyle,
     account_registry: account::AccountRegistry,
     legacy_account_initial: Option<char>,
+    account_login: Option<account::LoginOperation>,
+    account_cleanup: Option<account::CleanupOperation>,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -158,6 +160,12 @@ const IDM_ALERT_20: u16 = 82;
 const IDM_ALERT_30: u16 = 83;
 const IDM_STYLE_BAR: u16 = 90;
 const IDM_STYLE_CIRCLE: u16 = 91;
+const IDM_ACCOUNT_ADD: u16 = 100;
+const IDM_ACCOUNT_CANCEL: u16 = 101;
+const IDM_ACCOUNT_REAUTH_SLOT1: u16 = 110;
+const IDM_ACCOUNT_REAUTH_SLOT2: u16 = 111;
+const IDM_ACCOUNT_REMOVE_SLOT1: u16 = 120;
+const IDM_ACCOUNT_REMOVE_SLOT2: u16 = 121;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -1848,6 +1856,8 @@ pub fn run() {
                 widget_style: settings.widget_style,
                 account_registry,
                 legacy_account_initial,
+                account_login: None,
+                account_cleanup: None,
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -2969,6 +2979,9 @@ unsafe extern "system" fn wnd_proc(
         WM_TIMER => {
             let timer_id = wparam.0;
             match timer_id {
+                TIMER_ACCOUNT_LIFECYCLE => {
+                    poll_account_lifecycle(hwnd);
+                }
                 TIMER_POLL => {
                     let auth_watch = {
                         let state = lock_state();
@@ -3248,6 +3261,20 @@ unsafe extern "system" fn wnd_proc(
                         do_poll(sh);
                     });
                 }
+                IDM_ACCOUNT_ADD => begin_account_login(hwnd),
+                IDM_ACCOUNT_CANCEL => cancel_account_login(),
+                IDM_ACCOUNT_REAUTH_SLOT1 => {
+                    begin_account_reauth(hwnd, account::MonitorAuthHandle::Slot1)
+                }
+                IDM_ACCOUNT_REAUTH_SLOT2 => {
+                    begin_account_reauth(hwnd, account::MonitorAuthHandle::Slot2)
+                }
+                IDM_ACCOUNT_REMOVE_SLOT1 => {
+                    begin_account_removal(hwnd, account::MonitorAuthHandle::Slot1)
+                }
+                IDM_ACCOUNT_REMOVE_SLOT2 => {
+                    begin_account_removal(hwnd, account::MonitorAuthHandle::Slot2)
+                }
                 IDM_VERSION_ACTION => {
                     let (install_channel, release) = {
                         let state = lock_state();
@@ -3520,6 +3547,9 @@ fn show_context_menu(hwnd: HWND) {
             show_weekly_window,
             widget_style,
             alert_threshold_percent,
+            account_items,
+            account_login_active,
+            account_cleanup_active,
         ) = {
             let state = lock_state();
             match state.as_ref() {
@@ -3539,6 +3569,19 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_weekly_window,
                     s.widget_style,
                     s.alert_threshold_percent,
+                    s.account_registry
+                        .accounts()
+                        .iter()
+                        .map(|account| {
+                            (
+                                account.initial,
+                                account.auth_handle,
+                                account.connection_state,
+                            )
+                        })
+                        .collect(),
+                    s.account_login.is_some(),
+                    s.account_cleanup.is_some(),
                 ),
                 None => (
                     POLL_15_MIN,
@@ -3556,6 +3599,9 @@ fn show_context_menu(hwnd: HWND) {
                     true,
                     WidgetStyle::Bar,
                     0,
+                    Vec::new(),
+                    false,
+                    false,
                 ),
             }
         };
@@ -3599,6 +3645,117 @@ fn show_context_menu(hwnd: HWND) {
             MF_POPUP,
             freq_menu.0 as usize,
             PCWSTR::from_raw(freq_label.as_ptr()),
+        );
+
+        // Monitored account lifecycle submenu. Account entries expose only
+        // the initial and connection state; identity/credential material stays
+        // in the account domain and its Codex-owned auth handle.
+        let accounts_menu = CreatePopupMenu().unwrap();
+        if account_items.is_empty() {
+            let label = native_interop::wide_str("No monitored accounts");
+            let _ = AppendMenuW(
+                accounts_menu,
+                MF_GRAYED,
+                0,
+                PCWSTR::from_raw(label.as_ptr()),
+            );
+        } else {
+            for (initial, _handle, connection_state) in &account_items {
+                let initial = initial
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "?".into());
+                let label = native_interop::wide_str(&format!(
+                    "{initial}   {}",
+                    account_connection_state_label(*connection_state)
+                ));
+                let _ = AppendMenuW(
+                    accounts_menu,
+                    MF_GRAYED,
+                    0,
+                    PCWSTR::from_raw(label.as_ptr()),
+                );
+            }
+        }
+
+        let manage_menu = CreatePopupMenu().unwrap();
+        if account_items.is_empty() {
+            let label = native_interop::wide_str("No accounts to manage");
+            let _ = AppendMenuW(manage_menu, MF_GRAYED, 0, PCWSTR::from_raw(label.as_ptr()));
+        } else {
+            for (initial, handle, _connection_state) in &account_items {
+                let initial = initial
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "?".into());
+                let reauth_label = native_interop::wide_str(&format!("Re-authenticate {initial}"));
+                let _ = AppendMenuW(
+                    manage_menu,
+                    MENU_ITEM_FLAGS(0),
+                    account_reauth_menu_id(*handle) as usize,
+                    PCWSTR::from_raw(reauth_label.as_ptr()),
+                );
+                let remove_label = native_interop::wide_str(&format!("Remove {initial}"));
+                let remove_flags = if account_cleanup_active {
+                    MF_GRAYED
+                } else {
+                    MENU_ITEM_FLAGS(0)
+                };
+                let _ = AppendMenuW(
+                    manage_menu,
+                    remove_flags,
+                    account_remove_menu_id(*handle) as usize,
+                    PCWSTR::from_raw(remove_label.as_ptr()),
+                );
+            }
+        }
+
+        let manage_label = native_interop::wide_str("Manage accounts");
+        let _ = AppendMenuW(
+            accounts_menu,
+            MF_POPUP,
+            manage_menu.0 as usize,
+            PCWSTR::from_raw(manage_label.as_ptr()),
+        );
+        let _ = AppendMenuW(accounts_menu, MF_SEPARATOR, 0, PCWSTR::null());
+
+        let add_disabled = account_login_active
+            || account_cleanup_active
+            || account_items.len() >= account::MAX_MONITORED_ACCOUNTS;
+        let add_label = if account_items.len() >= account::MAX_MONITORED_ACCOUNTS {
+            "Add account... (maximum two)"
+        } else if account_login_active {
+            "Add account... (login in progress)"
+        } else if account_cleanup_active {
+            "Add account... (operation in progress)"
+        } else {
+            "Add account..."
+        };
+        let add_label = native_interop::wide_str(add_label);
+        let add_flags = if add_disabled {
+            MF_GRAYED
+        } else {
+            MENU_ITEM_FLAGS(0)
+        };
+        let _ = AppendMenuW(
+            accounts_menu,
+            add_flags,
+            IDM_ACCOUNT_ADD as usize,
+            PCWSTR::from_raw(add_label.as_ptr()),
+        );
+        if account_login_active {
+            let cancel_label = native_interop::wide_str("Cancel login");
+            let _ = AppendMenuW(
+                accounts_menu,
+                MENU_ITEM_FLAGS(0),
+                IDM_ACCOUNT_CANCEL as usize,
+                PCWSTR::from_raw(cancel_label.as_ptr()),
+            );
+        }
+        let accounts_label = native_interop::wide_str("Accounts");
+        let _ = AppendMenuW(
+            menu,
+            MF_POPUP,
+            accounts_menu.0 as usize,
+            PCWSTR::from_raw(accounts_label.as_ptr()),
         );
 
         // Models submenu
@@ -3922,6 +4079,307 @@ fn show_context_menu(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
         let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
+    }
+}
+
+enum AccountLifecycleEvent {
+    Login {
+        handle: account::MonitorAuthHandle,
+        expected_identity: Option<String>,
+        result: Result<account::AccountIdentity, account::LoginError>,
+    },
+    Cleanup {
+        account_id: String,
+        result: Result<(), account::LoginError>,
+    },
+}
+
+fn account_connection_state_label(state: account::ConnectionState) -> &'static str {
+    match state {
+        account::ConnectionState::Connected => "Connected",
+        account::ConnectionState::ReauthRequired => "Re-auth required",
+        account::ConnectionState::Unavailable => "Unavailable",
+    }
+}
+
+fn account_reauth_menu_id(handle: account::MonitorAuthHandle) -> u16 {
+    match handle {
+        account::MonitorAuthHandle::Slot1 => IDM_ACCOUNT_REAUTH_SLOT1,
+        account::MonitorAuthHandle::Slot2 => IDM_ACCOUNT_REAUTH_SLOT2,
+    }
+}
+
+fn account_remove_menu_id(handle: account::MonitorAuthHandle) -> u16 {
+    match handle {
+        account::MonitorAuthHandle::Slot1 => IDM_ACCOUNT_REMOVE_SLOT1,
+        account::MonitorAuthHandle::Slot2 => IDM_ACCOUNT_REMOVE_SLOT2,
+    }
+}
+
+fn begin_account_login(hwnd: HWND) {
+    let handle = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state.account_registry.available_auth_handle()
+    };
+
+    let Some(handle) = handle else {
+        show_info_message(
+            hwnd,
+            "Accounts",
+            "Maximum two monitored accounts are supported.",
+        );
+        return;
+    };
+
+    {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state.account_login = Some(account::LoginOperation::start(handle, None));
+    }
+    unsafe {
+        SetTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE, 250, None);
+    }
+}
+
+fn begin_account_reauth(hwnd: HWND, handle: account::MonitorAuthHandle) {
+    let account_id = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state
+            .account_registry
+            .account_by_handle(handle)
+            .map(|account| account.id.clone())
+    };
+
+    let Some(account_id) = account_id else {
+        return;
+    };
+    {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state.account_login = Some(account::LoginOperation::start(handle, Some(account_id)));
+    }
+    unsafe {
+        SetTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE, 250, None);
+    }
+}
+
+fn begin_account_removal(hwnd: HWND, handle: account::MonitorAuthHandle) {
+    let account_id = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state
+            .account_registry
+            .account_by_handle(handle)
+            .map(|account| account.id.clone())
+    };
+
+    let Some(account_id) = account_id else {
+        return;
+    };
+    {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if state.account_login.is_some() || state.account_cleanup.is_some() {
+            return;
+        }
+        state.account_cleanup = Some(account::CleanupOperation::start(account_id, handle));
+    }
+    unsafe {
+        SetTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE, 250, None);
+    }
+}
+
+fn cancel_account_login() {
+    let state = lock_state();
+    if let Some(state) = state.as_ref() {
+        if let Some(operation) = state.account_login.as_ref() {
+            operation.cancel();
+        }
+    }
+}
+
+fn poll_account_lifecycle(hwnd: HWND) {
+    let event = {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if let Some(operation) = state.account_login.as_ref() {
+            let handle = operation.handle();
+            let expected_identity = operation.expected_identity().map(str::to_string);
+            match operation.try_result() {
+                Ok(Some(result)) => {
+                    state.account_login = None;
+                    Some(AccountLifecycleEvent::Login {
+                        handle,
+                        expected_identity,
+                        result,
+                    })
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    state.account_login = None;
+                    Some(AccountLifecycleEvent::Login {
+                        handle,
+                        expected_identity,
+                        result: Err(account::LoginError::LoginFailed),
+                    })
+                }
+            }
+        } else if let Some(operation) = state.account_cleanup.as_ref() {
+            let account_id = operation.account_id().to_string();
+            match operation.try_result() {
+                Ok(Some(result)) => {
+                    state.account_cleanup = None;
+                    Some(AccountLifecycleEvent::Cleanup { account_id, result })
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    state.account_cleanup = None;
+                    Some(AccountLifecycleEvent::Cleanup {
+                        account_id,
+                        result: Err(account::LoginError::LoginFailed),
+                    })
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    let active = {
+        let state = lock_state();
+        state
+            .as_ref()
+            .is_some_and(|state| state.account_login.is_some() || state.account_cleanup.is_some())
+    };
+    if !active {
+        unsafe {
+            let _ = KillTimer(hwnd, TIMER_ACCOUNT_LIFECYCLE);
+        }
+    }
+
+    let Some(event) = event else {
+        return;
+    };
+    match event {
+        AccountLifecycleEvent::Login {
+            handle,
+            expected_identity,
+            result: Ok(identity),
+        } => {
+            if expected_identity.is_some() {
+                let updated = {
+                    let mut state = lock_state();
+                    state.as_mut().is_some_and(|state| {
+                        state
+                            .account_registry
+                            .update_identity(&identity.id, &identity)
+                    })
+                };
+                if updated {
+                    save_state_settings();
+                    render_layered();
+                    sync_tray_icons(hwnd);
+                }
+            } else {
+                let result = {
+                    let mut state = lock_state();
+                    state.as_mut().map(|state| {
+                        state
+                            .account_registry
+                            .try_add(account::MonitoredAccount::from_identity(&identity, handle))
+                    })
+                };
+                match result {
+                    Some(Ok(())) => {
+                        save_state_settings();
+                        position_at_taskbar();
+                        render_layered();
+                        sync_tray_icons(hwnd);
+                    }
+                    Some(Err(account::RegistryError::DuplicateIdentity)) => {
+                        account::cleanup_monitor_owner_in_background(handle);
+                        show_info_message(hwnd, "Accounts", "This account is already monitored.");
+                    }
+                    Some(Err(account::RegistryError::DuplicateAuthOwner))
+                    | Some(Err(account::RegistryError::CapacityReached)) => {
+                        account::cleanup_monitor_owner_in_background(handle);
+                        show_info_message(
+                            hwnd,
+                            "Accounts",
+                            "Maximum two monitored accounts are supported.",
+                        );
+                    }
+                    Some(Err(account::RegistryError::EmptyIdentity)) | None => {
+                        account::cleanup_monitor_owner_in_background(handle);
+                        show_error_message(
+                            hwnd,
+                            "Accounts",
+                            "The account identity could not be read.",
+                        );
+                    }
+                }
+            }
+        }
+        AccountLifecycleEvent::Login {
+            handle,
+            result: Err(error),
+            ..
+        } => {
+            let _ = handle;
+            show_error_message(hwnd, "Accounts", error.user_message());
+        }
+        AccountLifecycleEvent::Cleanup {
+            account_id,
+            result: Ok(()),
+        } => {
+            let removed = {
+                let mut state = lock_state();
+                state
+                    .as_mut()
+                    .and_then(|state| state.account_registry.remove_by_id(&account_id))
+                    .is_some()
+            };
+            if removed {
+                save_state_settings();
+                position_at_taskbar();
+                render_layered();
+                sync_tray_icons(hwnd);
+            }
+        }
+        AccountLifecycleEvent::Cleanup {
+            result: Err(error), ..
+        } => show_error_message(hwnd, "Accounts", error.user_message()),
     }
 }
 

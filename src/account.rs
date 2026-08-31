@@ -1,7 +1,19 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use std::time::SystemTime;
+
+use codex_http_client::{HttpClientFactory, OutboundProxyPolicy};
+use codex_login::{
+    AuthCredentialsStoreMode, AuthDotJson, AuthKeyringBackendKind, AuthManager, LoginSuccessPage,
+    ServerOptions, TokenData, CLIENT_ID,
+};
 
 use crate::models::UsageData;
 
@@ -25,6 +37,19 @@ impl MonitorAuthHandle {
             Self::Slot1 => "monitor-auth/slot-1",
             Self::Slot2 => "monitor-auth/slot-2",
         }
+    }
+
+    pub const fn all() -> [Self; MAX_MONITORED_ACCOUNTS] {
+        [Self::Slot1, Self::Slot2]
+    }
+
+    /// Resolve the clean production owner root at runtime. This path is never
+    /// serialized into `AccountRegistryMetadata`.
+    pub fn storage_path(self) -> Option<PathBuf> {
+        let root = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(dirs::data_local_dir)?;
+        Some(root.join("CodexUsage").join(self.namespace_key()))
     }
 }
 
@@ -184,6 +209,53 @@ impl AccountRegistry {
             .and_then(|account| account.initial)
     }
 
+    pub fn available_auth_handle(&self) -> Option<MonitorAuthHandle> {
+        MonitorAuthHandle::all().into_iter().find(|handle| {
+            self.accounts
+                .iter()
+                .all(|account| account.auth_handle != *handle)
+        })
+    }
+
+    pub fn account_by_handle(&self, handle: MonitorAuthHandle) -> Option<&MonitoredAccount> {
+        self.accounts
+            .iter()
+            .find(|account| account.auth_handle == handle)
+    }
+
+    pub fn update_identity(&mut self, account_id: &str, identity: &AccountIdentity) -> bool {
+        let Some(account) = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.id == account_id)
+        else {
+            return false;
+        };
+        account.initial = identity.initial();
+        true
+    }
+
+    pub fn update_auth_handle(
+        &mut self,
+        account_id: &str,
+        new_handle: MonitorAuthHandle,
+    ) -> Result<(), RegistryError> {
+        if self
+            .accounts
+            .iter()
+            .any(|account| account.id != account_id && account.auth_handle == new_handle)
+        {
+            return Err(RegistryError::DuplicateAuthOwner);
+        }
+        let account = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.id == account_id)
+            .ok_or(RegistryError::EmptyIdentity)?;
+        account.auth_handle = new_handle;
+        Ok(())
+    }
+
     pub fn metadata(&self) -> AccountRegistryMetadata {
         AccountRegistryMetadata {
             accounts: self
@@ -274,6 +346,284 @@ pub fn from_codex_auth_projection(
         display_name: claims.name,
         username: claims.username.or(claims.preferred_username),
         email: claims.email,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoginError {
+    AuthNamespaceUnavailable,
+    RuntimeUnavailable,
+    LoginFailed,
+    Cancelled,
+    TimedOut,
+    NotAuthenticated,
+    IdentityUnavailable,
+    IdentityChanged,
+}
+
+impl LoginError {
+    pub const fn user_message(self) -> &'static str {
+        match self {
+            Self::AuthNamespaceUnavailable => "Monitor credential storage is unavailable.",
+            Self::RuntimeUnavailable => "The monitor login runtime could not start.",
+            Self::LoginFailed => "Account login could not be completed.",
+            Self::Cancelled => "Account login was cancelled.",
+            Self::TimedOut => "Account login timed out.",
+            Self::NotAuthenticated => "The account was not authenticated.",
+            Self::IdentityUnavailable => "The account identity could not be read.",
+            Self::IdentityChanged => {
+                "Re-authentication resolved to a different account; the existing account was kept."
+            }
+        }
+    }
+}
+
+pub struct LoginOperation {
+    handle: MonitorAuthHandle,
+    expected_identity: Option<String>,
+    cancel_requested: Arc<AtomicBool>,
+    cancel_handle: Arc<Mutex<Option<codex_login::ShutdownHandle>>>,
+    result_rx: Receiver<Result<AccountIdentity, LoginError>>,
+}
+
+impl LoginOperation {
+    pub fn start(handle: MonitorAuthHandle, expected_identity: Option<String>) -> Self {
+        let cancel_requested = Arc::new(AtomicBool::new(false));
+        let cancel_handle = Arc::new(Mutex::new(None));
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let worker_cancel_requested = Arc::clone(&cancel_requested);
+        let worker_cancel_handle = Arc::clone(&cancel_handle);
+        let worker_expected_identity = expected_identity.clone();
+        thread::spawn(move || {
+            let result = run_login(
+                handle,
+                worker_expected_identity,
+                worker_cancel_requested,
+                worker_cancel_handle,
+            );
+            let _ = result_tx.send(result);
+        });
+        Self {
+            handle,
+            expected_identity,
+            cancel_requested,
+            cancel_handle,
+            result_rx,
+        }
+    }
+
+    pub fn handle(&self) -> MonitorAuthHandle {
+        self.handle
+    }
+
+    pub fn expected_identity(&self) -> Option<&str> {
+        self.expected_identity.as_deref()
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_requested.store(true, Ordering::Release);
+        if let Some(handle) = self
+            .cancel_handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            handle.shutdown();
+        }
+    }
+
+    pub fn try_result(&self) -> Result<Option<Result<AccountIdentity, LoginError>>, TryRecvError> {
+        match self.result_rx.try_recv() {
+            Ok(result) => Ok(Some(result)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(TryRecvError::Disconnected),
+        }
+    }
+}
+
+pub struct CleanupOperation {
+    account_id: String,
+    result_rx: Receiver<Result<(), LoginError>>,
+}
+
+impl CleanupOperation {
+    pub fn start(account_id: String, handle: MonitorAuthHandle) -> Self {
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let result = run_cleanup(handle);
+            let _ = result_tx.send(result);
+        });
+        Self {
+            account_id,
+            result_rx,
+        }
+    }
+
+    pub fn account_id(&self) -> &str {
+        &self.account_id
+    }
+
+    pub fn try_result(&self) -> Result<Option<Result<(), LoginError>>, TryRecvError> {
+        match self.result_rx.try_recv() {
+            Ok(result) => Ok(Some(result)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(TryRecvError::Disconnected),
+        }
+    }
+}
+
+fn auth_route_config() -> codex_login::AuthRouteConfig {
+    codex_login::AuthRouteConfig::from_http_client_factory(HttpClientFactory::new(
+        OutboundProxyPolicy::ReqwestDefault,
+    ))
+}
+
+async fn auth_manager(handle: MonitorAuthHandle) -> Result<Arc<AuthManager>, LoginError> {
+    let storage_path = handle
+        .storage_path()
+        .ok_or(LoginError::AuthNamespaceUnavailable)?;
+    Ok(AuthManager::shared(
+        storage_path,
+        false,
+        AuthCredentialsStoreMode::Keyring,
+        None,
+        None,
+        AuthKeyringBackendKind::Secrets,
+        auth_route_config(),
+    )
+    .await)
+}
+
+pub fn cleanup_monitor_owner_in_background(handle: MonitorAuthHandle) {
+    thread::spawn(move || {
+        let _ = run_cleanup(handle);
+    });
+}
+
+fn run_login(
+    handle: MonitorAuthHandle,
+    expected_identity: Option<String>,
+    cancel_requested: Arc<AtomicBool>,
+    cancel_handle: Arc<Mutex<Option<codex_login::ShutdownHandle>>>,
+) -> Result<AccountIdentity, LoginError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| LoginError::RuntimeUnavailable)?;
+    runtime.block_on(async move {
+        let storage_path = handle
+            .storage_path()
+            .ok_or(LoginError::AuthNamespaceUnavailable)?;
+
+        let previous_tokens = if expected_identity.is_some() {
+            let manager = auth_manager(handle).await?;
+            let auth = manager.auth().await.ok_or(LoginError::NotAuthenticated)?;
+            if auth.get_account_id() != expected_identity {
+                return Err(LoginError::IdentityUnavailable);
+            }
+            Some(
+                auth.get_token_data()
+                    .map_err(|_| LoginError::NotAuthenticated)?,
+            )
+        } else {
+            None
+        };
+
+        if cancel_requested.load(Ordering::Acquire) {
+            return Err(LoginError::Cancelled);
+        }
+
+        let mut options = ServerOptions::new(
+            storage_path.clone(),
+            CLIENT_ID.to_string(),
+            None,
+            AuthCredentialsStoreMode::Keyring,
+            AuthKeyringBackendKind::Secrets,
+            auth_route_config(),
+        );
+        options.port = 1455;
+        options.login_success_page = LoginSuccessPage::Local;
+        let server = codex_login::run_login_server(options).map_err(|_| LoginError::LoginFailed)?;
+        let shutdown = server.cancel_handle();
+        *cancel_handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(shutdown.clone());
+        if cancel_requested.load(Ordering::Acquire) {
+            shutdown.shutdown();
+        }
+
+        let callback = match tokio::time::timeout(
+            Duration::from_secs(5 * 60),
+            server.block_until_done_with_callback_result(),
+        )
+        .await
+        {
+            Ok(Ok(callback)) => callback,
+            Ok(Err(_)) if cancel_requested.load(Ordering::Acquire) => {
+                return Err(LoginError::Cancelled);
+            }
+            Ok(Err(_)) => return Err(LoginError::LoginFailed),
+            Err(_) => {
+                shutdown.shutdown();
+                return Err(LoginError::TimedOut);
+            }
+        };
+        let _ = callback;
+
+        let manager = auth_manager(handle).await?;
+        let auth = manager.auth().await.ok_or(LoginError::NotAuthenticated)?;
+        let token_data = auth
+            .get_token_data()
+            .map_err(|_| LoginError::NotAuthenticated)?;
+        let identity =
+            from_codex_auth_projection(auth.get_account_id(), Some(&token_data.id_token.raw_jwt))
+                .ok_or(LoginError::IdentityUnavailable)?;
+
+        if let Some(expected_identity) = expected_identity {
+            if identity.id != expected_identity {
+                if let Some(previous_tokens) = previous_tokens {
+                    restore_managed_tokens(&storage_path, previous_tokens)?;
+                }
+                return Err(LoginError::IdentityChanged);
+            }
+        }
+
+        Ok(identity)
+    })
+}
+
+fn restore_managed_tokens(path: &std::path::Path, tokens: TokenData) -> Result<(), LoginError> {
+    let auth = AuthDotJson {
+        auth_mode: None,
+        openai_api_key: None,
+        tokens: Some(tokens),
+        last_refresh: None,
+        agent_identity: None,
+        personal_access_token: None,
+        bedrock_api_key: None,
+        bedrock_access_keys: None,
+    };
+    codex_login::save_auth(
+        path,
+        &auth,
+        AuthCredentialsStoreMode::Keyring,
+        AuthKeyringBackendKind::Secrets,
+    )
+    .map_err(|_| LoginError::LoginFailed)
+}
+
+fn run_cleanup(handle: MonitorAuthHandle) -> Result<(), LoginError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| LoginError::RuntimeUnavailable)?;
+    runtime.block_on(async move {
+        let manager = auth_manager(handle).await?;
+        manager
+            .logout_with_revoke()
+            .await
+            .map(|_| ())
+            .map_err(|_| LoginError::LoginFailed)
     })
 }
 
@@ -460,6 +810,23 @@ mod tests {
         assert_eq!(registry.len(), 2);
         assert_eq!(registry.accounts()[0].auth_handle, MonitorAuthHandle::Slot1);
         assert_eq!(registry.accounts()[1].auth_handle, MonitorAuthHandle::Slot2);
+    }
+
+    #[test]
+    fn reauthentication_updates_display_identity_without_replacing_owner() {
+        let mut registry = AccountRegistry::empty();
+        registry
+            .try_add(monitored(
+                "account-a",
+                Some("Alice"),
+                MonitorAuthHandle::Slot1,
+            ))
+            .unwrap();
+
+        let resolved_identity = identity("account-a", Some("Alicia"));
+        assert!(registry.update_identity("account-a", &resolved_identity));
+        assert_eq!(registry.accounts()[0].initial, Some('A'));
+        assert_eq!(registry.accounts()[0].auth_handle, MonitorAuthHandle::Slot1);
     }
 
     #[test]

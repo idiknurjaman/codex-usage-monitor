@@ -7,6 +7,9 @@ description = "Codex Usage"
 homepage = "https://github.com/upstream-ray/codex-usage-monitor"
 repository = "https://github.com/upstream-ray/codex-usage-monitor"
 
+[workspace]
+resolver = "2"
+
 [package.metadata.winres]
 CompanyName = "Ray"
 ProductName = "Codex Usage"
@@ -23,6 +26,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 sha2 = "0.10"
+codex-login = { git = "https://github.com/openai/codex.git", rev = "94cbbddafc1776d5e377bca1b05932c697e82238" }
+codex-http-client = { git = "https://github.com/openai/codex.git", rev = "94cbbddafc1776d5e377bca1b05932c697e82238" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 
 [dependencies.windows]
 version = "0.58"
@@ -44,6 +50,10 @@ features = [
 
 [build-dependencies]
 winres = "0.1"
+
+[patch.crates-io]
+tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
 
 [profile.release]
 opt-level = "z"
