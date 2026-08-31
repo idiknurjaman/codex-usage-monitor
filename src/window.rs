@@ -3670,13 +3670,9 @@ fn account_menu_entries(state: &AppState) -> Vec<AccountMenuEntry> {
 fn handle_account_menu_command(hwnd: HWND, command_id: u16) {
     let action = {
         let state = lock_state();
-        state.as_ref().and_then(|state| {
-            state
-                .account_menu_routes
-                .iter()
-                .find(|route| route.command_id == command_id)
-                .map(|route| route.action.clone())
-        })
+        state
+            .as_ref()
+            .and_then(|state| resolve_account_menu_action(&state.account_menu_routes, command_id))
     };
     match action {
         Some(AccountMenuAction::Reauthenticate(account_id)) => {
@@ -3687,8 +3683,26 @@ fn handle_account_menu_command(hwnd: HWND, command_id: u16) {
     }
 }
 
+fn resolve_account_menu_action(
+    routes: &[AccountMenuRoute],
+    command_id: u16,
+) -> Option<AccountMenuAction> {
+    routes
+        .iter()
+        .find(|route| route.command_id == command_id)
+        .map(|route| route.action.clone())
+}
+
 fn show_context_menu(hwnd: HWND) {
     unsafe {
+        {
+            let mut state = lock_state();
+            if let Some(state) = state.as_mut() {
+                // Routes are bounded to the latest menu and must survive
+                // TrackPopupMenu until the owner receives WM_COMMAND.
+                state.account_menu_routes.clear();
+            }
+        }
         let (
             current_interval,
             strings,
@@ -4252,10 +4266,6 @@ fn show_context_menu(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
         let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
-        let mut state = lock_state();
-        if let Some(state) = state.as_mut() {
-            state.account_menu_routes.clear();
-        }
     }
 }
 
@@ -5488,6 +5498,51 @@ mod tests {
             "Sidik · Active"
         );
         assert_eq!(account_menu_label(None, Some('N'), false), "N");
+    }
+
+    #[test]
+    fn dynamic_account_routes_resolve_after_menu_tracking_returns() {
+        let routes = vec![
+            AccountMenuRoute {
+                command_id: IDM_ACCOUNT_ACTION_BASE,
+                action: AccountMenuAction::Reauthenticate("account-b".to_string()),
+            },
+            AccountMenuRoute {
+                command_id: IDM_ACCOUNT_ACTION_BASE + 1,
+                action: AccountMenuAction::Remove("account-b".to_string()),
+            },
+        ];
+
+        match resolve_account_menu_action(&routes, IDM_ACCOUNT_ACTION_BASE) {
+            Some(AccountMenuAction::Reauthenticate(account_id)) => {
+                assert_eq!(account_id, "account-b")
+            }
+            _ => panic!("re-auth route did not resolve to account-b"),
+        }
+        match resolve_account_menu_action(&routes, IDM_ACCOUNT_ACTION_BASE + 1) {
+            Some(AccountMenuAction::Remove(account_id)) => assert_eq!(account_id, "account-b"),
+            _ => panic!("remove route did not resolve to account-b"),
+        }
+    }
+
+    #[test]
+    fn next_menu_replaces_stale_dynamic_routes_without_fixed_slots() {
+        let old_routes = vec![AccountMenuRoute {
+            command_id: IDM_ACCOUNT_ACTION_BASE,
+            action: AccountMenuAction::Reauthenticate("account-a".to_string()),
+        }];
+        let current_routes = vec![AccountMenuRoute {
+            command_id: IDM_ACCOUNT_ACTION_BASE,
+            action: AccountMenuAction::Reauthenticate("account-b".to_string()),
+        }];
+
+        assert!(resolve_account_menu_action(&old_routes, IDM_ACCOUNT_ACTION_BASE).is_some());
+        match resolve_account_menu_action(&current_routes, IDM_ACCOUNT_ACTION_BASE) {
+            Some(AccountMenuAction::Reauthenticate(account_id)) => {
+                assert_eq!(account_id, "account-b")
+            }
+            _ => panic!("current route did not replace the stale route"),
+        }
     }
 
     #[test]
