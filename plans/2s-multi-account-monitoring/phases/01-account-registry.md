@@ -1,73 +1,91 @@
 # Phase 01 — Account Registry
 
-**Status:** `complete/PASS`
+**Status:** `complete/PASS — capacity policy superseded`
 **Goal:** introduce a stable multi-account domain model and move account identity/auth ownership out of the window renderer.
 
-## Preconditions
+## Historical gate status
 
-- Phase 00 is PASS.
-- `EVIDENCE.md` names one approved monitor credential/auth mechanism.
-- Working Codex state remains outside 2S ownership.
+Phase 01 passed Sol review at implementation checkpoint `84c8e14d2ce3cef06be2cfd3925d575e5cb9076c` for these durable boundaries:
 
-## Required model
+- stable identity separate from credential ownership;
+- non-secret persisted metadata;
+- deterministic registry ordering;
+- duplicate detection by stable identity rather than initial;
+- unique credential-owner ownership;
+- renderer does not own auth/JWT parsing;
+- legacy current-Codex identity remains ephemeral when no registry exists.
 
-Introduce an account domain that can represent up to two monitored Codex accounts without exposing credentials to UI code.
+Those boundaries remain authoritative.
+
+The original max-two/`Slot1|Slot2` capacity shape is **superseded** by the owner-approved product amendment in [`../PRODUCT-AMENDMENT-2026-08-31.md`](../PRODUCT-AMENDMENT-2026-08-31.md). Phase 01 is not reopened as a separate execution phase; Phase 02 is explicitly authorized to reconcile these implementation details while preserving the Phase 01 invariants above.
+
+## Current canonical model requirements
+
+The account domain must support a collection of stable account identities without exposing credentials to UI code.
 
 Recommended logical shape:
 
 ```text
-MonitoredAccount
-- id                 stable, non-secret local identifier
-- initial            one uppercase display character
-- enabled            bool
-- auth_handle         opaque reference to credential owner
-- connection_state    connected | reauth_required | unavailable
-- usage               optional per-account UsageData
-- last_success_at      optional timestamp
-- last_error           optional categorized error
+KnownAccount
+- id                   stable identity
+- initial/name          presentation metadata
+- enabled/retained      persistent monitor intent
+- auth_handle           optional opaque monitor credential owner
+- connection_state      connected | reauth_required | unavailable
+- usage                 optional per-account UsageData
+- last_success_at       optional timestamp
+- last_error            optional categorized error
+
+ActiveAccountRole
+- runtime-only identity match against current working Codex
 ```
 
-Names may differ if the codebase suggests a better Rust shape, but these responsibilities must remain separate.
+Names may differ if the Rust code suggests a better shape, but responsibilities must remain separate.
 
 ## Architecture requirements
 
 - `window.rs` must not parse JWTs or open Codex auth files to derive account identity.
-- UI receives account identity/usage through domain state.
+- UI receives identity/usage/active-role projections through account/application state.
 - Credential/token material must not be serialized into `settings.json`.
-- Account registry metadata may persist only non-secret fields needed to reconnect to an approved credential owner.
-- Maximum account count is two for this plan.
+- Registry metadata may persist only non-secret fields needed to identify retained accounts and reconnect to approved credential owners.
+- Account collection capability must be N-capable; current runtime product policy is **four retained accounts**.
+- Capacity must be enforced by policy/validation, not by `Slot1|Slot2|Slot3|Slot4` type variants.
 - Account order is deterministic and persisted.
-- Duplicate detection uses a stable account identity when available, not the one-letter initial.
-- Two accounts with the same initial are valid.
+- Duplicate detection uses stable account identity, never the one-letter initial.
+- Same-initial accounts are valid.
+- Monitor credential owner is optional until safe independent ownership exists.
+- Active status is runtime-derived from working Codex identity and is never persisted as credential ownership.
 
-## Tasks
+## Reconciliation delegated to Phase 02
 
-- [ ] Add account-domain types in an appropriate module instead of `window.rs`.
-- [ ] Move current Codex initial derivation out of the renderer.
-- [ ] Add stable account identity derivation based on the approved Phase 00 mechanism.
-- [ ] Add persisted non-secret account registry metadata.
-- [ ] Enforce maximum two monitored Codex accounts.
-- [ ] Add deterministic ordering.
-- [ ] Add duplicate-account detection independent of initial.
-- [ ] Preserve current single-account behavior through an adapter/migration path.
-- [ ] Add unit tests for identity derivation, duplicate detection, max-two enforcement, and same-initial accounts.
+Phase 02 is authorized to:
 
-## Acceptance criteria
+- replace `MAX_MONITORED_ACCOUNTS = 2` with current max-four retained policy;
+- replace fixed `MonitorAuthHandle::{Slot1, Slot2}` with a validated collection-friendly logical owner handle/index or equivalent;
+- preserve uniqueness of credential ownership;
+- preserve serialization compatibility where practical and add explicit migration when required;
+- add automatic working-account discovery and runtime active-role projection;
+- keep manual add as a second discovery/owner-provisioning path.
+
+## Current acceptance invariants
 
 - Existing single-account users start without losing settings.
-- Renderer no longer owns credential parsing.
-- Registry can represent zero, one, or two monitored accounts.
+- Renderer does not own credential parsing.
+- Registry can represent a variable account collection subject to current max-four policy.
 - Same-initial accounts do not collide.
+- Duplicate stable identities reconcile rather than produce duplicate rows.
 - No secret appears in settings serialization or diagnostics.
 - Existing usage semantics remain unchanged.
+- Active role and monitor credential ownership remain separate concepts.
+- No account-position hard-coding is required by downstream polling/menu/rendering.
 
 ## Hard stops
 
-- Do not implement login UI in this phase.
-- Do not implement polling fan-out in this phase.
+- Do not use token copying to convert the working active credential into monitor ownership.
 - Do not introduce account switching.
-- Do not invent another auth storage strategy if Phase 00 evidence becomes inconvenient. Re-open Phase 00 instead.
+- Do not invent another auth storage strategy if Phase 00 evidence becomes inconvenient; re-open the auth proof instead.
+- Do not preserve a fixed-slot type shape merely by expanding two variants to four.
 
 ## Evidence
 
-Record changed files, tests, and the final account model in `../EVIDENCE.md` before marking this phase complete.
+Historical Phase 01 evidence remains valid for the durable identity/ownership boundaries at its exact checkpoint. New capacity/generalization evidence belongs to the amended Phase 02 implementation checkpoint and must be recorded as current evidence before Phase 02 can pass.
