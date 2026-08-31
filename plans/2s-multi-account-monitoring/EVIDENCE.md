@@ -7,7 +7,7 @@
 - **Current phase:** `02-account-login`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `d026d8736ce4fb4909ed9231245d5984afcb9404`
+- **Implementation checkpoint:** `97657d794aed4aaf857a005e2d79e363b8b926f5`
 
 ## Baseline evidence
 
@@ -20,7 +20,7 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-The Phase 01 account registry model is implemented. Multi-account credential lifecycle, polling, and UI remain out of scope for this phase.
+The amended Phase 02 account model is implemented at the checkpoint above. Phase 03 recurring multi-account polling and Phase 04 final collection taskbar UI remain out of scope.
 
 ## Open findings / blockers
 
@@ -38,7 +38,7 @@ Resolved by the Phase 01 account-domain projection; `window.rs` now consumes reg
 
 ### FINDING-02 — current initial is startup-scoped
 
-Phase 01 introduces explicit registry hydration and runtime account identity state; later lifecycle phases still own reconnect/re-auth behavior.
+Resolved for the amended Phase 02 source: current identity is re-observed through the existing normal polling cycle and represented as a runtime active role. Phase 03 still owns recurring independent retained-account polling.
 
 ## Phase evidence
 
@@ -369,55 +369,59 @@ No login UI, multi-account login/re-auth lifecycle, polling fan-out, account swi
 
 ### Phase 02 — Account Login & Lifecycle
 
-**Status:** `READY FOR SOL REVIEW`
+**Status:** `READY FOR SOL REVIEW — amended source checkpoint`
 
-Phase 02 is the active phase. Implementation evidence is recorded below at checkpoint `d026d8736ce4fb4909ed9231245d5984afcb9404`. Login UI/lifecycle is in scope; polling fan-out, account switching, and later phases remain out of scope.
+Phase 02 is the active phase. The superseded two-account runtime walkthrough is not used. Current amended authority is docs HEAD `50b485c4d86cc0ee5e62f567c8ee692f2f1e8906`; implementation checkpoint is `97657d794aed4aaf857a005e2d79e363b8b926f5`.
 
-### Phase 02 — Account Login evidence
+#### Collection-driven account model
 
-**Status:** `READY FOR SOL REVIEW`
+- `AccountRegistry` is a deterministic collection with policy `MAX_RETAINED_ACCOUNTS = 4`; capacity is not encoded as account-position variants.
+- `MonitorAuthHandle` is a typed dynamic positive owner index. New serialized values are `owner-N` and runtime namespaces are `monitor-auth/owner-N`; legacy `slot-N` input is accepted only for safe metadata reconstruction. No `auth-spike` namespace or absolute path is serialized or resolved.
+- `auth_handle` is optional. Automatic working-account discovery may retain an identity without an independent owner and marks it `ReauthRequired` when it becomes inactive; no working access/refresh token is copied.
+- Startup and existing normal polling observations project the current working Codex identity into runtime state. A known identity is updated without duplication; a new identity is auto-retained when capacity exists; at capacity it is current-only and retained accounts are not evicted.
+- Active status is derived from the runtime working identity and is absent from `AccountRegistryMetadata`/settings.
+- Explicit removal of the current retained identity records a runtime suppression so repeated observation leaves it current-only until the working identity changes; removal never logs normal Codex out.
 
-**Implementation checkpoint:** `d026d8736ce4fb4909ed9231245d5984afcb9404`
+#### Manual lifecycle and menu routing
 
-#### Ownership and lifecycle implementation
-
-- Added direct production dependencies `codex-login` and `codex-http-client` pinned to Codex source SHA `94cbbddafc1776d5e377bca1b05932c697e82238`; the accepted Phase 00 mechanism remains `AuthCredentialsStoreMode::Keyring` + `AuthKeyringBackendKind::Secrets`.
-- `MonitorAuthHandle::Slot1/Slot2` resolves at runtime only to clean `monitor-auth/slot-1` and `monitor-auth/slot-2` under the local app-data root. No `auth-spike` reuse/migration, absolute settings path, normal `~/.codex` ownership, or inference path was added.
-- `Accounts` context menu exposes initial-only account status, `Add account...`, `Manage accounts >`, per-account `Re-authenticate`, per-account `Remove`, and `Cancel login`.
-- Add checks `AccountRegistry::available_auth_handle()` before starting browser login. A third account is rejected before login with a clear maximum-two message.
-- Login runs off the window thread through `run_login_server`, `AuthManager::auth()`, `CodexAuth::get_account_id()`, and `CodexAuth::get_token_data()`; registry commit occurs only after identity/duplicate validation.
-- Re-auth uses the selected owner, snapshots the existing managed token in memory, restores it if the new login resolves to a different stable identity, and never silently changes the registry identity.
-- Remove runs `logout_with_revoke()` only for the selected typed owner; registry removal follows cleanup success. Cancellation, timeout, and failure leave the prior registry unchanged.
+- Manual `Add monitor account...` preflights lifecycle state and retained count before `LoginOperation::start()`. At four retained accounts it is disabled and no OAuth server starts.
+- Manual login resolves through `reconcile_manual_identity()`: a new identity is added with the dynamically allocated owner; a known ownerless identity is attached; a known already-owned identity does not create a second row and the newly-created owner is rolled back.
+- Account menu construction iterates the collection and creates direct per-account submenus. The nested `Manage accounts >` menu and all per-slot action constants are removed. The menu has disabled `Account` and `Manage account` section labels, direct account entries, `Re-authenticate`, `Remove from monitor`, and the amended Add label.
+- Re-auth keeps the expected stable identity, can start with a missing owner, attaches a newly allocated owner when needed, and leaves the existing identity unchanged on mismatch.
+- Existing transaction safety from `ba7721d` remains: pre-login owner state is captured in memory; every post-server non-commit path restores or clears the selected owner; rollback failure is explicit; commit drops the snapshot only after registry acceptance.
+- Successful Add/Re-auth starts one bounded account-scoped initial usage read using the approved monitor owner and direct usage endpoint. No Phase 03 polling fan-out is introduced.
 
 #### Automated acceptance evidence
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 44 passed, 0 failed.
-- `cargo clippy --all-targets --locked`: PASS exit. Fourteen existing warnings remain in `poller.rs`/`window.rs`; no new account-lifecycle warning remains.
-- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-release-target"; cargo build --release --locked`: PASS — optimized release build in the alternate target. The default release executable remained locked by the already-running widget and was not terminated.
-- `git diff --check`: PASS.
+- `cargo test --locked`: PASS — 62 passed, 0 failed.
+- `cargo clippy --all-targets --locked`: PASS exit; existing warnings remain in legacy `poller.rs`/`window.rs` code, with no amended account-model warning introduced.
+- `$env:CARGO_TARGET_DIR="$env:TEMP\codex-usage-phase02-amended-release-target"; cargo build --release --locked`: PASS — optimized release build. Binary: `C:\Users\SIDIKN~1\AppData\Local\Temp\codex-usage-phase02-amended-release-target\release\codex-usage.exe`.
+- `git diff --check`: PASS before source checkpoint.
 
-#### Phase 02 lifecycle matrix
+#### Focused regression coverage
 
-| Requirement | Result | Evidence |
-|---|---|---|
-| Add selects capacity/owner before login | PASS bounded | Available typed slot is checked before `LoginOperation::start()`. |
-| Commit only after identity/duplicate validation | PASS bounded | Worker returns identity; UI calls registry validation before persistence. |
-| Duplicate login leaves registry consistent | PASS bounded | Duplicate result triggers owner cleanup and no registry insertion. |
-| Cancel/timeout leaves registry unchanged | PASS bounded | Cancellation flag/shutdown and timeout return errors before commit. |
-| Re-auth different identity is not silent | PASS bounded | Existing auth snapshot is restored and registry is not mutated. |
-| Remove is owner-scoped | PASS bounded | Cleanup receives only selected `MonitorAuthHandle`; registry removal follows success. |
-| Restart metadata has no tokens | PASS | Existing typed metadata serializer/settings tests remain green. |
+The 62-test suite includes coverage for:
+
+- four-account retention policy and dynamic owner allocation without `Slot1`/`Slot2` type variants;
+- legacy `slot-N` metadata input migrating to serialized `owner-N`, with no `auth-spike` or absolute path;
+- automatic identity discovery with ownerless active identity, inactive `ReauthRequired` state, and no working-owner copy;
+- manual duplicate reconciliation attaching an owner to one existing identity and refusing a second owner/row;
+- runtime active-role matching remaining outside persisted metadata;
+- direct account labels preferring display name plus runtime `· Active` marker;
+- fifth manual Add preflight disabled at four retained accounts and while lifecycle work is busy;
+- current-account removal suppression/current-only behavior;
+- prior transactional missing-reauth, commit, identity-mismatch rollback, cancel, timeout, error, rollback-failure, duplicate cleanup, and cross-account isolation cases.
 
 #### Runtime proof boundary
 
-The real-account Add A/B → restart → re-auth/remove walkthrough was not run in this checkpoint because the previously running widget instance still owns the default release executable. No manual runtime PASS is claimed here; the source and automated acceptance gate is ready for Sol review.
+The amended owner-approved UI/runtime walkthrough has not been run from this implementation checkpoint. The prior A/B walkthrough is explicitly superseded and is not claimed as evidence. The Codex desktop tool runner cannot provide Sidik’s interactive taskbar/browser session, so no real-account PASS is claimed here; runtime proof remains `NOT YET PROVEN` for Sol’s review.
 
 #### Scope guard
 
-No polling fan-out, multi-account usage polling, account switching, auto-switching, inference refresh, Phase 03 work, Phase 04 UI, or Phase 05 work was added.
+Phase 03 has not started. No recurring multi-account polling fan-out, account switching, auto-switching, inference refresh, final collection taskbar rendering/tooltip/ring, or later-phase behavior was added.
 
-**Decision:** `READY FOR SOL REVIEW`. Phase 02 source/automated acceptance evidence is complete at the checkpoint above; manual runtime lifecycle proof remains explicitly not claimed.
+**Decision:** `READY FOR SOL REVIEW`. Amended Phase 02 source and automated evidence is current at `97657d794aed4aaf857a005e2d79e363b8b926f5`; real-account runtime proof is explicitly open.
 
 ### Phase 03 — Multi-Account Polling
 
