@@ -531,10 +531,17 @@ the current proof contract.
 
 The current-only/ownerless B state showed a partial or unavailable quota
 window. This is an intentional safe result: missing or unsafe data was not
-converted into synthetic `0%` remaining. The runtime walkthrough did not claim
-separate alert-balloon delivery or an auth-expiry event beyond the source/F/S
-isolation proof above; those remain explicitly `NOT YET PROVEN` if required by
-the final Sol matrix interpretation.
+converted into synthetic `0%` remaining. No separate alert-balloon runtime
+event or deliberately forced token-expiry event was performed; those specific
+runtime events are not claimed.
+
+The Phase 03 owner-refresh/auth-isolation and zero-inference closure is
+attributed to the combined proof boundary: the historical Phase 00 Class R
+real-owner refresh/deletion isolation proof using the same approved pinned
+`codex-login` mechanism, plus the current Phase 03 Class S/F production-path
+source and state-machine regression proof. The current Phase 03 Class R
+walkthrough adds the observed A/B polling, attribution, active-role, removal,
+and current-only safety proof.
 
 #### Verification
 
@@ -559,11 +566,11 @@ behavior was added. The accepted Phase 02 auth mechanism remains direct pinned
 `codex-login` with `Keyring + Secrets`, isolated `monitor-auth/slot-*` owners,
 no normal Codex workspace ownership, and no token copying.
 
-**Decision:** `READY FOR SOL FINAL GATE` — Class S/F implementation and
-deterministic proof are complete at
-`acb870d204d83bcba71534aeab5910784e74b1c1`.
-Class R Phase 03 runtime is not claimed. Phase 03 is the only active phase;
-Phase 04 has not started.
+**Decision:** `READY FOR SOL FINAL GATE` — Class R owner runtime PASS bounded,
+plus Class F/S implementation and deterministic proof PASS, all against
+`acb870d204d83bcba71534aeab5910784e74b1c1`. The separate alert-balloon and
+deliberately forced token-expiry runtime events remain unclaimed. Phase 03 is
+the only active phase; Phase 04 has not started.
 
 ### Phase 04 — Taskbar UI
 

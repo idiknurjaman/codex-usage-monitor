@@ -68,17 +68,17 @@ When current identity changes:
 
 ## Tasks
 
-- [ ] Introduce collection-driven per-account poll orchestration.
-- [ ] Resolve credential source per account without identity ambiguity.
-- [ ] Aggregate results while preserving healthy accounts when another fails.
-- [ ] Add per-account connection/error/stale state.
-- [ ] Add monitor-owner refresh behavior using the Phase 00 approved mechanism.
-- [ ] Remove multi-account dependency on `cli_refresh_codex_token()` / `codex exec "."`.
-- [ ] Account-scope low-quota alert deduplication.
-- [ ] Handle weekly-only/missing-window responses independently per account.
-- [ ] Handle different reset times independently.
-- [ ] Preserve active-role changes independently from quota attribution.
-- [ ] Add tests across 1, 2, and 4 retained accounts plus mixed success/failure.
+- [x] Introduce collection-driven per-account poll orchestration.
+- [x] Resolve credential source per account without identity ambiguity.
+- [x] Aggregate results while preserving healthy accounts when another fails.
+- [x] Add per-account connection/error/stale state.
+- [x] Add monitor-owner refresh behavior using the Phase 00 approved mechanism.
+- [x] Remove multi-account dependency on `cli_refresh_codex_token()` / `codex exec "."`.
+- [x] Account-scope low-quota alert deduplication.
+- [x] Handle weekly-only/missing-window responses independently per account.
+- [x] Handle different reset times independently.
+- [x] Preserve active-role changes independently from quota attribution.
+- [x] Add tests across 1, 2, and 4 retained accounts plus mixed success/failure.
 
 ## Acceptance criteria
 
