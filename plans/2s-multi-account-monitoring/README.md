@@ -5,33 +5,52 @@
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 **Current product amendment baseline:** `ba7721d2bde2659e18e34db45757a4023dd4ecc8`
+**Current Phase 02 implementation checkpoint:** `537b2bbad951ccbb43f04ba9067b55b304f4d232`
+
+## Mandatory authority order
+
+Before executing, reviewing, or gating this plan, read in this order:
+
+1. root `README.md`;
+2. `plans/README.md`;
+3. this file;
+4. [`PRODUCT-AMENDMENT-2026-08-31.md`](./PRODUCT-AMENDMENT-2026-08-31.md);
+5. [`PROOF-CONTRACT-AMENDMENT-2026-09-01.md`](./PROOF-CONTRACT-AMENDMENT-2026-09-01.md);
+6. the current phase document;
+7. [`TEST-MATRIX.md`](./TEST-MATRIX.md);
+8. [`EVIDENCE.md`](./EVIDENCE.md).
+
+The proof-contract amendment is authoritative for **proof modality** from Phase 02 onward. Where older phase/test text literally requires three, four, or five distinct real accounts solely for count/capacity/render cardinality, the proof-contract amendment supersedes that requirement. The product behavior itself is unchanged.
 
 ## Goal
 
-Monitor Codex usage through a collection-driven account model that distinguishes the account currently active in the user's normal Codex runtime from retained monitor accounts, while leaving the user's normal Codex workspace, sessions, history, config, and active credential untouched.
+Monitor Codex usage through a collection-driven account model that distinguishes the account currently active in the user's normal Codex runtime from retained monitor accounts, while leaving normal Codex workspace, sessions, history, config, and active credential ownership untouched.
 
-The account capability must not be structurally limited to two accounts. Product policy for this iteration is:
+Current product policy:
 
-- up to **four retained accounts**;
-- automatic discovery of the current working Codex identity;
-- manual `Add monitor account...` as a secondary path;
-- active account determined at runtime from the working Codex identity;
-- inactive retained accounts remain in the monitor until the user explicitly removes them;
-- no Codex account switching by 2S.
+- capability is structurally collection/N-capable;
+- maximum **four retained accounts** in this iteration;
+- current normal-Codex identity is auto-discovered;
+- runtime active role is derived, never persisted as ownership;
+- manual `Add monitor account...` is a secondary path;
+- previously active identities remain retained until explicit removal;
+- no account switching by 2S;
+- fifth manual Add is disabled before OAuth starts;
+- four retained + unknown external current identity produces current-only overflow without silent eviction.
 
-`2S` remains the project codename. It is not a two-slot capacity contract.
+`2S` is the codename, not a two-slot contract.
 
 ## Product authority and execution
 
 - **Sidik:** final product authority and runtime acceptance.
-- **Luna:** sole implementation writer/executor for implementation work.
+- **Luna:** sole implementation writer/executor.
 - **Sol:** architecture review, plan authoring/amendment, phase-gate audit, and final closure audit.
 
-Luna may proceed from this plan without asking Sidik to choose details already resolved here. Any unresolved credential/auth contradiction is a hard stop and must be surfaced rather than guessed through.
+Luna may proceed without asking Sidik to choose details already resolved by current authority. Any unresolved auth/credential contradiction is a hard stop.
 
 ## Canonical account model
 
-Three concepts must remain separate:
+Keep these concepts separate:
 
 ```text
 Account identity
@@ -42,192 +61,166 @@ Active role
 
 Monitor credential owner
   optional isolated credential owner used to keep an account readable
-  when it is not the current working Codex account
+  when it is not the current working account
 ```
 
-A single account record may move between active and inactive roles. Active status is never a persisted account property.
-
-The persistent registry is a collection of known/retained account identities, not `account_a/account_b` fields. Account actions, polling, alerts, menu routing, and rendering must iterate the collection rather than hard-code account positions.
+The persistent registry is a collection of retained identities, not `account_a/account_b` fields. Active status is not persisted. Account actions, polling, alerts, menu routing, and rendering iterate the collection rather than hard-code account positions.
 
 ### Automatic discovery
 
 On startup and when the working Codex identity changes:
 
-1. Read the current stable Codex identity through the existing adapter boundary.
-2. If that identity is already known, mark it active at runtime; do not create a duplicate.
-3. If it is new and retained capacity is available, add the identity to the known-account registry automatically.
-4. When Codex later switches from A to B, B becomes active and A remains retained until explicit removal.
+1. read the current stable identity through the existing adapter boundary;
+2. if already known, mark it active at runtime;
+3. if new and retained capacity is available, retain it automatically;
+4. when A → B, B becomes active and A remains retained until removal;
+5. never duplicate an identity discovered through both automatic and manual paths.
 
-Automatic discovery does **not** authorize token copying. An account is only considered independently live-monitorable after it has an approved independent monitor credential owner. If an auto-discovered account lacks such an owner after it becomes inactive, keep the identity visible with an explicit unavailable/re-auth state until safe monitor ownership is established. Do not fake live monitoring or duplicate the working refresh token.
+Automatic discovery is identity discovery only. It never authorizes copying the working access/refresh token into a monitor owner.
 
-### Manual add
+If an inactive retained account has no independent monitor owner, keep it visible with explicit re-auth/unavailable state instead of faking live monitoring.
 
-`Accounts > Add monitor account...` remains available as a secondary path for an account the user wants to monitor without first making it active in Codex.
+### Manual Add
 
-If manual login resolves to an identity already present in the registry, reconcile/attach the monitor credential to that identity rather than create a duplicate account row.
+`Accounts > Add monitor account...` may add a new identity or reconcile/attach an isolated monitor owner to an existing identity. It must never replace normal working Codex auth.
 
-### Runtime capacity policy
-
-The implementation capability must be collection/N-capable. The current product policy is:
+### Capacity
 
 ```text
 MAX_RETAINED_ACCOUNTS = 4
 ```
 
-The fifth **manual** add action must be disabled before OAuth/login starts.
+Four is policy, not type shape. Do not encode the capability as `Slot1|Slot2|Slot3|Slot4`, account-specific fields, fixed poll functions, or per-slot action constants.
 
-If four accounts are retained and the user independently switches normal Codex to an unknown fifth identity, 2S must still recognize the current identity because it cannot hide or veto the user's Codex login. That identity is current-only and is not silently persisted or used to evict an existing retained account. The UI must make capacity state understandable and allow the user to remove a retained account before retaining the new identity.
+At four retained accounts:
 
-No silent eviction is allowed.
+- manual Add is disabled before OAuth/login dispatch;
+- an externally selected unknown current Codex identity is still recognized current-only;
+- no retained identity is silently evicted;
+- capacity must be freed explicitly before the new identity can be retained.
 
-## Credential ownership rules
+## Credential boundary
 
-- The normal Codex workspace remains the source of truth for normal Codex sessions/history/config and current active credential.
-- Monitor credentials are isolated credential owners only; they are never second Codex workspaces.
-- Never copy or duplicate one refresh token into independently refreshing owners.
-- Prefer the approved direct pinned `codex-login` mechanism with `Keyring + Secrets`.
-- A monitor account may have no independent owner yet; that is an explicit capability/state, not synthetic success.
-- A quota poll must never make an inference request.
-- Raw credentials/tokens must never enter settings, logs, diagnostics, screenshots, tooltips, or evidence.
+- Normal Codex remains source of truth for the user's current credential and workspace/session/history/config state.
+- Monitor owners contain auth credentials only, not a second Codex workspace.
+- Never copy/duplicate a refresh token into independently refreshing owners.
+- Approved monitor auth mechanism remains direct pinned `codex-login`, `Keyring + Secrets`, isolated monitor-auth namespace, zero inference.
+- Raw credentials/tokens never enter settings, logs, diagnostics, screenshots, tooltips, or evidence.
+- One account failure must remain account-scoped.
+- Missing usage windows remain unavailable, never synthetic `0%`.
 
 ## Locked account UX
 
-### Taskbar active indication
+### Taskbar
 
-- Widget account identity stays compact: one-character initial/name chip as already established.
-- The current Codex account is indicated only by a subtle **blue outline/ring** around its identity chip.
-- Inactive monitored accounts keep the neutral border.
-- Active styling is derived from runtime identity matching, not persisted.
+- compact identity initial/name chip;
+- current account gets a subtle blue outline/ring;
+- inactive accounts use neutral outline;
+- no permanent `ACTIVE` word in compact taskbar.
 
-### Whole-account hover tooltip
+### Whole-account tooltip
 
-Hovering anywhere over an account block — initial, 5h row, weekly row, bars, percentage, or reset text — opens the same compact account tooltip.
+Hovering anywhere over one account block opens the same account-scoped tooltip with display name, current/monitored role, 5h and weekly remaining + exact reset, and connection state. Do not expose email or opaque account ID by default.
 
-Tooltip content should include:
-
-```text
-Account display name                     ACTIVE   (only when current)
-Current Codex account / Monitored account
-
-Usage remaining
-5h       <remaining %>       <exact reset time>
-Weekly   <remaining %>       <exact reset date/time>
-
-<Connected | Re-auth required | Unavailable>
-```
-
-Do not expose email or opaque account IDs by default. Tooltip is descriptive only; account management actions stay in the context menu.
-
-### Accounts context menu
-
-Remove the nested `Manage accounts >` layer.
-
-Target information architecture:
+### Context menu
 
 ```text
 Accounts >
-  Account                         (disabled section label)
-  Sidik · Active              >
-  Sol                         >
+  Account
+  Sidik · Active >
+  Sol            >
   ...
-  ─────────────────────────────
-  Manage account                  (disabled section label)
+  ─────────────────────
+  Manage account
   Add monitor account...
 ```
 
-Each account directly owns its submenu:
+`Account` and `Manage account` are disabled section labels. Each account submenu directly contains:
 
 ```text
-Sidik · Active >
-  Re-authenticate
-  Remove from monitor
+Re-authenticate
+Remove from monitor
 ```
 
-Rules:
+No nested `Manage accounts >` layer. Routing is dynamic by stable identity. `Remove from monitor` never logs normal Codex out.
 
-- use display name when available; initial is fallback only;
-- `· Active` may appear in the menu for the runtime current account;
-- `Remove from monitor` never logs normal Codex out;
-- removing the current account removes retained/monitor ownership, but the account remains visible while it is still the current Codex account;
-- `Add monitor account...` is disabled at four retained accounts and while conflicting lifecycle work is active;
-- do not create per-slot menu constants such as `REAUTH_SLOT1/2` or `REMOVE_SLOT1/2`; routing must be collection-driven.
+## Proof model
 
-## In scope
+The current proof contract deliberately separates **credential truth** from **higher-cardinality state truth**.
 
-- Collection-driven account registry and auth-owner allocation.
-- Product limit of four retained accounts.
-- Automatic working-Codex identity discovery and runtime active-role attribution.
-- Manual monitor-account add.
-- Safe per-account monitor credential ownership, re-authentication, and removal.
-- Independent 5h/7d usage polling and account-scoped failure/alert state.
-- Bar/Circle rendering for the account collection.
-- Active blue identity ring and whole-account informational tooltip.
-- Direct per-account context-menu actions.
+### Real-account proof
 
-## Out of scope
+Use available real accounts for OAuth/credential-sensitive behavior: auto-discovery, A↔B active movement, manual Add/reconcile, restart, re-auth, remove, real usage/refresh, and working-Codex safety.
 
-- Switching the active Codex account.
-- Auto-switching when quota is low.
-- Routing Codex inference requests between accounts.
-- Changing `~/.codex` sessions, history, project state, or config.
-- Copying monitor credentials into or out of the active Codex credential.
-- Proxying inference traffic.
-- Unlimited retained accounts in this iteration; runtime policy remains four.
+Two real accounts are sufficient for these claims unless a future behavior genuinely depends on more than two simultaneous real credential owners.
 
-## Non-negotiable architecture rules
+### Deterministic fixture proof
 
-1. **Monitoring and account switching are separate domains.**
-2. Working Codex state remains source of truth for current active identity and normal workspace state.
-3. Active role is runtime-derived and never persisted as ownership.
-4. Monitor auth roots own credentials only, never sessions/history/config/workspace state.
-5. Never duplicate a refresh token into multiple independently refreshing owners.
-6. Prefer Codex-managed authentication/refresh over custom OAuth refresh logic.
-7. A quota poll must not make inference traffic or intentionally consume quota.
-8. Credentials and raw tokens never appear in settings/logs/diagnostics/screenshots/evidence/UI.
-9. One account failing must not invalidate, hide, or pause another healthy account.
-10. Unknown/missing quota windows remain unavailable, never synthetic `0%`.
-11. Canonical model semantics remain `used_percentage: Option<f64>`; remaining conversion occurs at presentation/alert boundaries.
-12. Account/auth/menu/poll/render capability must be collection-driven; runtime policy, not type shape, enforces the four-account limit.
-13. Duplicate identity is reconciled, never represented as two account rows.
-14. Capacity handling never silently evicts a retained identity.
+Use non-secret identity/state/data fixtures for four/five-account count/capacity/orchestration/rendering behavior. Fixtures must not fabricate OAuth success or credential isolation. Full rules are in `PROOF-CONTRACT-AMENDMENT-2026-09-01.md`.
+
+This means the max-four requirement remains mandatory, but Sidik is not required to create extra real Codex accounts solely to exercise cardinality.
 
 ## Phase order
 
 | # | Phase | Gate |
 |---|---|---|
-| 00 | [Auth spike](./phases/00-auth-spike.md) | Prove isolated, zero-inference monitor credential ownership without mutating working Codex state |
-| 01 | [Account registry](./phases/01-account-registry.md) | Stable identity/ownership boundary; historical two-slot policy is superseded by the current amendment |
-| 02 | [Account login & lifecycle](./phases/02-account-login.md) | Reconcile the model to collection-driven max-four, add auto-discovery/manual add, active attribution, transaction-safe auth lifecycle |
-| 03 | [Multi-account polling](./phases/03-multi-account-polling.md) | Independent collection polling, failure isolation, account-scoped alerts |
-| 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu, no regressions |
+| 00 | [Auth spike](./phases/00-auth-spike.md) | Isolated zero-inference monitor credential ownership |
+| 01 | [Account registry](./phases/01-account-registry.md) | Stable identity/ownership boundary; historical two-slot policy superseded |
+| 02 | [Account login & lifecycle](./phases/02-account-login.md) | Collection-driven max-four lifecycle, auto-discovery, manual Add, active attribution, safe auth lifecycle |
+| 03 | [Multi-account polling](./phases/03-multi-account-polling.md) | Independent collection polling, failure isolation, scoped alerts |
+| 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 00 and 01 have passed their original Sol gates. The current product amendment supersedes their two-account capacity assumptions without reopening the proven identity/credential-ownership boundaries. Phase 02 is authorized to perform the required account-domain reconciliation. Phases 03–05 remain blocked.
+Phases 00 and 01 have passed their historical Sol gates. Phase 02 remains current. Phases 03–05 are blocked until their predecessors pass.
 
 ## Historical evidence disposition
 
-Evidence produced before this amendment remains valid only for the exact mechanism/checkpoint it proved. In particular, Phase 00 isolation proof and Phase 01 identity/owner separation remain authoritative; prior max-two, two-slot, Add-A/Add-B menu, and two-account runtime expectations are historical and do not prove the amended product behavior.
+Evidence is authoritative only for the exact checkpoint/mechanism and proof class it actually exercised.
 
-The Phase 02 runtime walkthrough requested before this amendment is **paused/superseded**. Do not continue it until Phase 02 implementation is reconciled to this document and current evidence is recorded.
+- Phase 00 isolation proof and Phase 01 identity/owner separation remain valid.
+- Historical max-two/two-slot assertions are not current product requirements.
+- The owner-observed two-account amended Phase 02 walkthrough at HEAD `5de898eca809dcc5011fae7587340e8dbbdc3a3a` remains valid real-account evidence for implementation checkpoint `537b2bbad951ccbb43f04ba9067b55b304f4d232`.
+- Its prior max-four/fifth-account `NOT PROVEN` entries are now fixture-proof requirements, not product failures, under the proof-contract amendment.
 
-See [`PRODUCT-AMENDMENT-2026-08-31.md`](./PRODUCT-AMENDMENT-2026-08-31.md) for the concise owner-approved amendment record.
+## Non-negotiable architecture rules
+
+1. Monitoring and switching are separate domains.
+2. Working Codex remains source of truth for current active identity/workspace state.
+3. Active role is runtime-derived, never persisted as ownership.
+4. Monitor auth roots own credentials only.
+5. Never duplicate a refresh token across independently refreshing owners.
+6. Prefer Codex-managed auth/refresh over custom refresh logic.
+7. Polling makes no intentional inference request.
+8. No credentials/raw tokens in persisted or user-visible evidence surfaces.
+9. One account failure is isolated.
+10. Missing windows are unavailable, never synthetic zero.
+11. Canonical semantics remain `used_percentage: Option<f64>` with remaining conversion at presentation/alert boundaries.
+12. Account/auth/menu/poll/render capability is collection-driven; four is policy only.
+13. Duplicate identity reconciles into one row.
+14. Capacity handling never silently evicts.
 
 ## Hard stops
 
-Stop implementation and report to Sol/Sidik if any of these occur:
+Stop and report instead of guessing if:
 
-- safe per-account credential isolation requires splitting normal Codex sessions/history/config;
-- seamless auto-discovery would require copying the working refresh token into a monitor owner;
-- the refresh/poll method requires inference traffic;
-- account attribution cannot reliably distinguish the runtime active identity from retained identities;
-- a monitor lifecycle operation can mutate/replace normal working Codex auth;
-- two monitor owners would race on the same refresh token;
-- a required auth mechanism relies on undocumented behavior that cannot be proven in a focused runtime test;
-- the implementation requires account-position hard-coding rather than collection-driven routing.
+- safe ownership would require splitting normal Codex workspace state;
+- auto-discovery would require copying working refresh token;
+- refresh/poll requires inference traffic;
+- account attribution cannot distinguish active identity from retained identities;
+- monitor lifecycle can mutate/replace normal working Codex auth;
+- two owners would race on the same refresh token;
+- the implementation requires account-position hard-coding;
+- a proposed deterministic fixture would need to fake OAuth/credential ownership rather than exercise a pure state seam.
 
 ## Definition of Done
 
-The plan is complete only when all current rows in [`TEST-MATRIX.md`](./TEST-MATRIX.md) are PASS, [`EVIDENCE.md`](./EVIDENCE.md) contains current evidence for the final implementation checkpoint, Sidik accepts runtime UI/behavior, and Sol completes final audit.
+The plan is complete only when:
+
+- every current `TEST-MATRIX.md` requirement is proven using its authorized proof mode from the proof-contract amendment;
+- `EVIDENCE.md` is current to the final implementation checkpoint and labels real runtime vs fixture/state-machine evidence accurately;
+- required command verification passes;
+- Sidik accepts representative real-account UI/runtime behavior;
+- Sol completes final audit with no open blocker/high-severity finding.
 
 Required final command proof:
 
@@ -239,8 +232,10 @@ cargo build --release
 git diff --check
 ```
 
-Existing unrelated Clippy warnings may be recorded, but the plan must introduce no new warning caused by its changes.
+## Current Phase 02 status and next authorized action
 
-## Next authorized action
+Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232` unless Luna changes source/test code during proof closure.
 
-Execute **Phase 02 reconciliation only** from the current branch. Do not run the superseded two-account walkthrough and do not begin recurring polling fan-out, final multi-account rendering, account switching, or later phases until Phase 02 passes Sol review.
+Available two-account real-runtime behavior is already owner-observed and recorded. The only remaining Phase 02 closure work is the deterministic Class F/S proof required by `PROOF-CONTRACT-AMENDMENT-2026-09-01.md`, including max-four/fifth-add/full-capacity-current-only behavior and one-shot initial-usage state consumption.
+
+Luna may execute **Phase 02 proof closure only**, update evidence, and stop at `READY FOR SOL FINAL GATE`. Do not begin Phase 03 until Sol issues Phase 02 PASS.
