@@ -585,8 +585,9 @@ accepted this Phase 03 evidence and authorized Phase 04.
 **Status:** `ready-for-sol-final-gate`
 
 Implementation checkpoint: `10afd36e9495b0c59571e70bf593af9a19d5a7ec`.
-Phase 04 source and deterministic visual/state evidence are complete; owner
-runtime acceptance remains for Sol's final gate.
+Phase 04 source and deterministic visual/state evidence are complete. Sidik's
+owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
+remains ready for Sol final-gate reconciliation.
 
 #### Class S — source/UI state proof
 
@@ -616,7 +617,7 @@ runtime acceptance remains for Sol's final gate.
   (`Re-authentication required`), and transient read failures (`Unavailable`).
 - The hover hit-test covers the full account block across the complete widget
   height. A delayed, non-activating native Win32 tooltip reports display name,
-  ``ACTIVE`` and current/monitored role, both remaining values, exact reset
+  `ACTIVE` and current/monitored role, both remaining values, exact reset
   values, and connection status without email or opaque account ID.
 - Existing direct collection-driven account menus and `Widget Style > Bar |
   Circle` persistence remain in place; this phase does not change their
@@ -658,14 +659,31 @@ The visual smoke environment could not reach the usage endpoint, so these
 captures intentionally show unavailable values rather than fabricated quota
 numbers. They are not real-account usage proof.
 
-#### Class R — owner runtime boundary
+#### Class R — owner runtime proof
 
-No new owner-observed Phase 04 walkthrough has been run yet. Class R runtime
-proof is required for the final gate to confirm the real taskbar embedding,
-active blue ring, whole-account tooltip, two-account attribution, unavailable
-isolation, direct menus, and DPI behavior on Sidik's Windows taskbar. The
-accepted Phase 00–03 credential, identity, lifecycle, and polling evidence
-remains unchanged and is not reclassified by this UI checkpoint.
+Sidik's owner-observed Phase 04 follow-up is accepted as bounded Class R
+evidence. Existing Bar/Circle, single-account, A/B switch, menu lifecycle,
+re-auth, and remove observations remain applicable because the
+`673d97` to `82d3b54` tooltip/status delta did not alter those mechanisms.
+The current checkpoint specifically reconfirms the changed tooltip/status
+behavior.
+
+| Scenario | Result | Class R observation |
+|---|---|---|
+| Real two-account taskbar rendering and attribution | PASS | A and B rendered as distinct taskbar account blocks with independently attributed quota values. |
+| Active blue ring | PASS | The blue ring followed the normal Codex active identity during A/B switching. |
+| Retained account with independent owner while another account is active | PASS | The inactive independently-owned account remained live and its owner stayed attached. |
+| Current ownerless account | PASS | Working-Codex reading remained usable while active and tooltip status showed `Connected via Codex`. |
+| Current ownerless tooltip guidance | PASS | Tooltip communicated `Re-authenticate to keep monitoring when inactive`. |
+| Inactive ownerless account | PASS | The production state was `Re-authentication required`; no credential borrowing occurred. |
+| Humanized reset and fixed tooltip columns | PASS | Reset labels were accepted in humanized local date/relative form and columns aligned visually. |
+| Account-scoped tooltip/privacy and direct menu | PASS | Current and monitored tooltips remained account-scoped and privacy-safe; direct Accounts menu remained correct. |
+| Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
+
+No new runtime claim is made for Explorer/taskbar restart, four-account real
+cardinality, same-initial real accounts, or a deliberately exercised
+multi-DPI walkthrough. Those remain Class F/S or pending rows below and must
+not be treated as Phase 05 closure.
 
 #### Verification
 
@@ -683,10 +701,9 @@ No changes were made to `poller.rs`, auth ownership, login lifecycle, quota
 semantics, reset calculations, account switching, or multi-account polling.
 Phase 05 remains blocked.
 
-**Decision:** `READY FOR SOL FINAL GATE` — Class S/F UI implementation and
-deterministic evidence are complete at
-`10afd36e9495b0c59571e70bf593af9a19d5a7ec`. Class R owner runtime acceptance
-is not claimed yet.
+**Decision:** `READY FOR SOL FINAL GATE` — Class R owner-runtime PASS bounded
+plus Class F/S UI implementation and deterministic evidence are complete
+at `10afd36e9495b0c59571e70bf593af9a19d5a7ec`. Phase 05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 

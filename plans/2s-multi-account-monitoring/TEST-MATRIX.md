@@ -44,21 +44,21 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | LIFE-08 | Restart | Restart after mixed auto/manual discovery | Retained identities restore; active role recomputed from current Codex | pending |
 | LIFE-09 | Max four | Retain A/B/C/D through valid paths | Four retained identities supported without structural slot hard-coding | pending |
 | LIFE-10 | Current overflow | With A/B/C/D retained, Codex changes to E | E current-only; A/B/C/D retained; user can free capacity explicitly | pending |
-| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS: remaining-fill and two-digit-countdown width regressions cover 81→19, 55→45, and 29d; owner taskbar runtime pending |
-| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS: remaining-fill and account text-width regressions cover Circle input boundary; owner taskbar runtime pending |
-| UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | Class F/S — PASS; owner taskbar runtime pending |
-| UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | Class S — PASS; owner tooltip runtime pending |
-| UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | Class S — PASS; owner tooltip runtime pending |
-| UI-06 | Tooltip privacy | Inspect tooltip | No email, opaque ID, token, OAuth material by default | Class S — PASS; owner tooltip runtime pending |
-| UI-07 | Two accounts | Bar/Circle | Both account groups readable; attribution correct | Class F/S — PASS for collection layout; owner two-account runtime pending |
-| UI-08 | Four accounts | Representative Bar/Circle runtime state | Four retained accounts readable; no action/identity collision | Class F — PASS for fixture layout; owner runtime pending |
-| UI-09 | Context menu | Accounts menu with multiple identities | Direct per-account submenu; no nested `Manage accounts >` | Class S — PASS; existing menu runtime pending |
-| UI-10 | Menu action | Account submenu | `Re-authenticate` + `Remove from monitor` route to selected identity | Class S — PASS; owner menu runtime pending |
-| UI-11 | Add disabled | Four retained accounts | `Add monitor account...` visibly disabled | Class F/S — PASS from existing preflight proof; owner visual runtime pending |
-| UI-12 | Same initial | Distinct accounts derive same initial | Both render/manage independently by stable identity | Class F/S — PASS; owner runtime pending |
-| UI-13 | Failure state | One account unavailable | Healthy accounts remain readable; failed account explicit | Class F/S — PASS; owner runtime pending |
-| UI-14 | Overflow state | Four retained + current-only E | Current identity remains understandable; no retained account silently dropped | Class F/S — PASS; owner overflow runtime pending |
-| UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class S — PASS for DPI-scaled geometry; owner multi-DPI runtime pending |
+| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class R — PASS bounded: real Bar rendering accepted; earlier unchanged-renderer proof remains applicable; no extra Phase 05 claim |
+| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class R — PASS bounded: real Circle rendering accepted; earlier unchanged-renderer proof remains applicable |
+| UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | Class R — PASS: blue ring followed runtime Codex active identity; Class F/S supports state seam |
+| UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | Class R — PASS: whole account-block hover accepted; Class S hit-test proof current |
+| UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | Class R — PASS: current-checkpoint tooltip hierarchy/status accepted |
+| UI-06 | Tooltip privacy | Inspect tooltip | No email, opaque ID, token, OAuth material by default | Class R — PASS bounded: account-scoped privacy-safe tooltip accepted |
+| UI-07 | Two accounts | Bar/Circle | Both account groups readable; attribution correct | Class R — PASS bounded: real two-account rendering and attribution accepted |
+| UI-08 | Four accounts | Representative Bar/Circle runtime state | Four retained accounts readable; no action/identity collision | Class F — PASS: deterministic four-account fixture; no four-real-account claim |
+| UI-09 | Context menu | Accounts menu with multiple identities | Direct per-account submenu; no nested `Manage accounts >` | Class R — PASS bounded: direct Accounts menu accepted; dynamic route tests remain Class S |
+| UI-10 | Menu action | Account submenu | `Re-authenticate` + `Remove from monitor` route to selected identity | Class R — PASS bounded: existing direct action walkthrough remains applicable |
+| UI-11 | Add disabled | Four retained accounts | `Add monitor account...` visibly disabled | Class F/S — PASS: deterministic preflight and fixture proof; no new runtime capacity claim |
+| UI-12 | Same initial | Distinct accounts derive same initial | Both render/manage independently by stable identity | Class F/S — PASS: same-initial deterministic proof; no real same-initial claim |
+| UI-13 | Failure state | One account unavailable | Healthy accounts remain readable; failed account explicit | Class R — PASS bounded: inactive ownerless re-auth-required and independent-owner health accepted; transient isolation remains Class F/S |
+| UI-14 | Overflow state | Four retained + current-only E | Current identity remains understandable; no retained account silently dropped | Class F/S — PASS: current-only overflow fixture; no real E claim |
+| UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class F/S — PASS for scalable geometry; no deliberate owner multi-DPI walkthrough claimed |
 | UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
 | UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | pending |
