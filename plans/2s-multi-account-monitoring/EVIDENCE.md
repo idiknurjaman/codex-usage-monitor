@@ -758,6 +758,14 @@ still have a focused owner visual check open; Phase 05 remains blocked.
 Phase 05 is authorized after the Phase 04 PASS. Reconcile the entire test
 matrix against valid Phase 00–04 evidence before adding new runtime proof.
 
+#### Phase 05 pre-runtime matrix reconciliation
+
+All current matrix rows are reconciled to valid Phase 00–04 Class R/F/S
+evidence except `UI-16` taskbar drag/multi-monitor placement and `UI-17`
+Explorer/taskbar restart. Those two resilience rows remain explicitly pending
+for new Phase 05 runtime proof; no historical or fixture evidence is being
+used to close them.
+
 ## Final audit
 
 **Sol verdict:** `Phase 04 PASS; Phase 05 active`
