@@ -28,6 +28,17 @@ const UTHEME_ALLOW_DARK_MODE: i32 = 1;
 type SetPreferredAppModeFn = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemesFn = unsafe extern "system" fn();
 
+fn native_popup_menu_theme_result(
+    has_set_preferred_app_mode: bool,
+    has_flush_menu_themes: bool,
+) -> NativePopupMenuThemeResult {
+    if has_set_preferred_app_mode && has_flush_menu_themes {
+        NativePopupMenuThemeResult::Applied
+    } else {
+        NativePopupMenuThemeResult::Unsupported
+    }
+}
+
 /// Ask classic Win32 popup menus to follow the system theme.
 ///
 /// Windows 10/11 expose this opt-in from `uxtheme.dll` as undocumented
@@ -42,21 +53,23 @@ pub fn apply_native_popup_menu_theme() -> NativePopupMenuThemeResult {
             return NativePopupMenuThemeResult::Unsupported;
         };
 
-        let Some(set_preferred_app_mode) = GetProcAddress(
+        let set_preferred_app_mode = GetProcAddress(
             module,
             ordinal_proc_name(UTHEME_SET_PREFERRED_APP_MODE_ORDINAL),
-        ) else {
+        );
+        let flush_menu_themes =
+            GetProcAddress(module, ordinal_proc_name(UTHEME_FLUSH_MENU_THEMES_ORDINAL));
+        if native_popup_menu_theme_result(
+            set_preferred_app_mode.is_some(),
+            flush_menu_themes.is_some(),
+        ) == NativePopupMenuThemeResult::Unsupported
+        {
             return NativePopupMenuThemeResult::Unsupported;
-        };
-        let Some(flush_menu_themes) =
-            GetProcAddress(module, ordinal_proc_name(UTHEME_FLUSH_MENU_THEMES_ORDINAL))
-        else {
-            return NativePopupMenuThemeResult::Unsupported;
-        };
+        }
 
         let set_preferred_app_mode: SetPreferredAppModeFn =
-            std::mem::transmute(set_preferred_app_mode);
-        let flush_menu_themes: FlushMenuThemesFn = std::mem::transmute(flush_menu_themes);
+            std::mem::transmute(set_preferred_app_mode.unwrap());
+        let flush_menu_themes: FlushMenuThemesFn = std::mem::transmute(flush_menu_themes.unwrap());
 
         // AllowDark follows the Windows preference; it does not force this
         // process into dark mode when the system is light.
@@ -130,11 +143,22 @@ mod tests {
     }
 
     #[test]
-    fn native_popup_theme_resolver_has_a_safe_runtime_fallback() {
-        let result = apply_native_popup_menu_theme();
-        assert!(matches!(
-            result,
-            NativePopupMenuThemeResult::Applied | NativePopupMenuThemeResult::Unsupported
-        ));
+    fn native_popup_theme_missing_export_uses_native_fallback() {
+        assert_eq!(
+            native_popup_menu_theme_result(true, true),
+            NativePopupMenuThemeResult::Applied
+        );
+        assert_eq!(
+            native_popup_menu_theme_result(false, true),
+            NativePopupMenuThemeResult::Unsupported
+        );
+        assert_eq!(
+            native_popup_menu_theme_result(true, false),
+            NativePopupMenuThemeResult::Unsupported
+        );
+        assert_eq!(
+            native_popup_menu_theme_result(false, false),
+            NativePopupMenuThemeResult::Unsupported
+        );
     }
 }
