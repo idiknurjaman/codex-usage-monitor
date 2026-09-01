@@ -156,5 +156,14 @@ Add current screenshot/runtime evidence for:
 - one healthy + one unavailable/re-auth state;
 - DPI/layout verification.
 
-Sidik runtime acceptance is required before Phase 04 passes; this checkpoint is
-ready for Sol final-gate review and does not claim owner runtime yet.
+Sidik owner-runtime acceptance is complete as bounded Class R evidence for
+representative real one/two-account Bar/Circle rendering, A↔B active-ring
+behavior, tooltip/privacy behavior, direct account menu behavior, and native
+taskbar interaction. Class F/S evidence covers the 3/4/E, same-initial,
+capacity, and higher-cardinality DPI/state cases under the proof-contract
+amendment. UI-16 drag/multi-monitor and UI-17 Explorer/taskbar restart remain
+pending for Phase 05 resilience/acceptance and are excluded from this Phase 04
+closure claim.
+
+Phase 04 remains `ready-for-sol-final-gate`; this document does not mark Phase
+04 `PASS`.
