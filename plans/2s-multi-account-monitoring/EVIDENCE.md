@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `6c55c0aab44d03ce05210ab9e379854be2104f31`.
+Implementation checkpoint: `e72f3d4dddabd312161f5fbf4a3f5fa92d546aaa`.
 Phase 04 source and deterministic visual/state evidence are complete. Sidik's
 owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
 remains ready for Sol final-gate reconciliation.
@@ -606,6 +606,9 @@ remains ready for Sol final-gate reconciliation.
 - Active state is derived by stable identity matching. The active identity chip
   uses a blue outline/ring; inactive chips use the neutral outline. No active
   role is persisted and no account switching control was added.
+- The account identity chip is 18 px in the compact taskbar layout, with a 20
+  px identity slot preserving spacing before the quota rows; widget height
+  remains unchanged.
 - Unavailable or stale account usage renders as `--`; missing windows remain
   unavailable and are never converted to synthetic `0%`.
 - Tooltip reset values use humanized local date/time plus relative countdown,
@@ -657,6 +660,7 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | `theme::tests::native_popup_theme_uses_feature_detected_uxtheme_exports` | Pins the reviewed ordinal/mode contract used for the dynamic native popup-menu opt-in. |
 | `theme::tests::native_popup_theme_missing_export_uses_native_fallback` | Deterministically proves any missing UxTheme export selects explicit `Unsupported` fallback while the complete export pair selects `Applied`. |
 | `theme::tests::native_popup_theme_follows_the_system_palette` | Proves dark Windows selects UxTheme `ForceDark` and light Windows selects `ForceLight`. |
+| `window::tests::account_initial_chip_is_larger_without_collapsing_text_spacing` | Proves the 18 px initial chip remains centered within the 46 px widget and retains a larger identity slot than the chip diameter. |
 
 #### Visual artifacts
 
@@ -696,6 +700,7 @@ behavior.
 | Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
 | Tooltip border removal | NOT YET OWNER-VERIFIED | Source removes the paint stroke while preserving the rounded region; visual owner confirmation is still required. |
 | Native menu theme | NOT YET OWNER-VERIFIED | Source dynamically opts classic native menus into system theme when UxTheme support exists; light/dark visual behavior still needs owner runtime confirmation. |
+| Larger account initial chip | NOT YET OWNER-VERIFIED | Source/test proof confirms 18 px sizing and preserved spacing; owner visual confirmation is still required. |
 
 #### Theme runtime smoke
 
@@ -720,14 +725,14 @@ not be treated as Phase 05 closure.
 #### Verification
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 90 passed, 0 failed.
+- `cargo test --locked`: PASS — 91 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing repository
   warnings remain, with no new compile error.
 - `CARGO_TARGET_DIR=<temp> cargo build --release --locked`: PASS — alternate
   optimized release build at
   `%TEMP%\codex-usage-phase04-theme-target\release\codex-usage.exe` after the
   tooltip/theme correction. SHA-256:
-  `18F3DC96DC7FA1A7E9CD3BB879EFDBAA79D37635C6245F0515BE6CCB2B6427B5`.
+  `D51BED4FAE4ACF45D03B178A9F1EE8D843085AC71697088839FA078688DD2957`.
 - `git diff --check`: PASS before checkpoint.
 
 #### Scope guard and disposition
@@ -738,9 +743,9 @@ Phase 05 remains blocked.
 
 **Decision:** `READY FOR SOL FINAL GATE` — Class R owner-runtime PASS bounded
 plus Class F/S UI implementation and deterministic evidence are complete
-at `6c55c0aab44d03ce05210ab9e379854be2104f31`. The new tooltip-frame and
-native-menu theme behavior still has a focused owner visual check open; Phase
-05 remains blocked.
+at `e72f3d4dddabd312161f5fbf4a3f5fa92d546aaa`. The new tooltip-frame,
+native-menu theme, and larger identity-chip behavior
+still have a focused owner visual check open; Phase 05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 
