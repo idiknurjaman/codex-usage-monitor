@@ -3448,29 +3448,12 @@ fn paint_tooltip(hdc: HDC, hwnd: HWND) {
         } else {
             Color::from_hex("#F8F8F8")
         };
-        let border = if is_dark {
-            Color::from_hex("#4A4A4A")
-        } else {
-            Color::from_hex("#C8C8C8")
-        };
+        // The rounded window region applied in show_pending_tooltip clips this
+        // fill to the requested shape. Do not draw a pen or replacement
+        // outline here: the tooltip intentionally has no visible stroke.
         let brush = CreateSolidBrush(COLORREF(background.to_colorref()));
         FillRect(hdc, &rect, brush);
         let _ = DeleteObject(brush);
-        let pen = CreatePen(PS_SOLID, sc(1), COLORREF(border.to_colorref()));
-        let old_pen = SelectObject(hdc, pen);
-        let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        let _ = RoundRect(
-            hdc,
-            rect.left,
-            rect.top,
-            rect.right,
-            rect.bottom,
-            sc(8),
-            sc(8),
-        );
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        let _ = DeleteObject(pen);
 
         let font_name = native_interop::wide_str("Segoe UI");
         let font = CreateFontW(
@@ -5051,6 +5034,11 @@ fn resolve_account_menu_action(
 
 fn show_context_menu(hwnd: HWND) {
     unsafe {
+        let popup_theme = theme::apply_native_popup_menu_theme();
+        diagnose::log(format!(
+            "native popup menu theme result={popup_theme:?} system_dark={}",
+            theme::is_dark_mode()
+        ));
         {
             let mut state = lock_state();
             if let Some(state) = state.as_mut() {
