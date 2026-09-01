@@ -7,8 +7,8 @@
 - **Current phase:** `04-taskbar-ui`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `10afd36e9495b0c59571e70bf593af9a19d5a7ec`
-- **Deterministic proof/test checkpoint:** `10afd36e9495b0c59571e70bf593af9a19d5a7ec`
+- **Implementation checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
+- **Deterministic proof/test checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
 
 ## Baseline evidence
 
@@ -698,9 +698,11 @@ behavior.
 | Humanized reset and fixed tooltip columns | PASS | Reset labels were accepted in humanized local date/relative form and columns aligned visually. |
 | Account-scoped tooltip/privacy and direct menu | PASS | Current and monitored tooltips remained account-scoped and privacy-safe; direct Accounts menu remained correct. |
 | Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
-| Tooltip border removal | NOT YET OWNER-VERIFIED | Source removes the paint stroke while preserving the rounded region; visual owner confirmation is still required. |
-| Native menu theme | NOT YET OWNER-VERIFIED | Source dynamically opts classic native menus into system theme when UxTheme support exists; light/dark visual behavior still needs owner runtime confirmation. |
-| Larger account initial chip | NOT YET OWNER-VERIFIED | Source/test proof confirms 24 px sizing and preserved spacing; owner visual confirmation is still required. |
+| Tooltip border removal and final tooltip polish | PASS | Sidik accepted the current build's rounded, borderless tooltip, spacing, typography, and column layout. |
+| Native menu theme and final menu polish | PASS bounded | Sidik accepted the current build's native menu behavior and polish; no separate light-theme visual walkthrough is claimed because it was not explicitly exercised. |
+| Larger account initial chip | PASS with non-blocking preference | Sidik accepted the 24 px chip visually, while noting it still feels slightly small. |
+| Real three-account taskbar smoke | PASS | A third account was discovered by becoming current in normal Codex; the three account blocks rendered as a real taskbar smoke state. |
+| Third account ownerless inactive transition | PASS | After normal Codex returned from account 3 to account 1, account 3 remained retained and correctly entered `Re-authentication required` without an independent monitor owner; no credential borrowing occurred. |
 
 #### Theme runtime smoke
 

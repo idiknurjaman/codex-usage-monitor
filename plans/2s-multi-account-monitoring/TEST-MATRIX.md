@@ -61,14 +61,15 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class F/S — PASS for scalable geometry; no deliberate owner multi-DPI walkthrough claimed |
 | UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
 | UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
-| UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class S — PASS: rounded tooltip region has no paint stroke; UxTheme opt-in is dynamic with native fallback; Class R light/dark visual check pending |
+| UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class R — PASS bounded: current-build tooltip/menu polish accepted; no separate light-theme visual walkthrough claimed |
+| UI-19 | Three accounts | Real taskbar smoke after normal Codex discovery | Third account renders as a distinct block; returning to account 1 leaves account 3 retained and ownerless-inactive without credential borrowing | Class R — PASS bounded: third account discovered by becoming current; after return to account 1 it remained retained and entered `Re-authentication required` |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | pending |
 | ARCH-02 | Routing | Inspect lifecycle/menu/poll/render code | No `account_a/b`, per-slot poll functions, or fixed per-slot command branches | pending |
 | ARCH-03 | Policy | Inspect capacity enforcement | Max four retained accounts enforced as policy/validation | pending |
 | MIG-01 | Settings | Existing settings without registry | App starts with valid working-account behavior | pending |
 | MIG-02 | Two-slot metadata | Existing Phase-01/02 `slot-1/slot-2` settings | Migrates/reconstructs safely into generalized owner-handle model | pending |
 | BUILD-01 | Formatting | `cargo fmt --check` | PASS | Class S — PASS at `acb870d204d83bcba71534aeab5910784e74b1c1` |
-| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 86/86 tests at `10afd36e9495b0c59571e70bf593af9a19d5a7ec` |
+| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 91/91 tests at `1cda2b33c7ed30166f364b26687a8876d347865d` |
 | BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | Class S — PASS exit; existing warnings only |
 | BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: default optimized release build completed |
 | BUILD-05 | Diff hygiene | `git diff --check` | PASS | Class S — PASS |

@@ -164,13 +164,16 @@ Add current screenshot/runtime evidence for:
 - DPI/layout verification.
 
 Sidik owner-runtime acceptance is complete as bounded Class R evidence for
-representative real one/two-account Bar/Circle rendering, A↔B active-ring
+representative real one/two/three-account Bar/Circle rendering, A↔B active-ring
 behavior, tooltip/privacy behavior, direct account menu behavior, and native
-taskbar interaction. Class F/S evidence covers the 3/4/E, same-initial,
-capacity, and higher-cardinality DPI/state cases under the proof-contract
-amendment. UI-16 drag/multi-monitor and UI-17 Explorer/taskbar restart remain
-pending for Phase 05 resilience/acceptance and are excluded from this Phase 04
-closure claim.
+taskbar interaction. The third-account smoke also confirms that a discovered
+account remains retained and becomes `Re-authentication required` when it is
+inactive without an independent monitor owner. Class F/S evidence covers the
+4/E, same-initial, capacity, and higher-cardinality DPI/state cases under the
+proof-contract amendment. UI-16 drag/multi-monitor and UI-17 Explorer/taskbar
+restart remain pending for Phase 05 resilience/acceptance and are excluded
+from this Phase 04 closure claim. No separate light-theme visual walkthrough
+is claimed.
 
 Phase 04 remains `ready-for-sol-final-gate`; this document does not mark Phase
 04 `PASS`.
