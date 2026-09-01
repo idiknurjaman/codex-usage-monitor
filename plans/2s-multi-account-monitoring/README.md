@@ -238,6 +238,6 @@ Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4
 
 Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 taskbar collection rendering and bounded owner-runtime evidence passed Sol's final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. The accepted Phase 00–04 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
 
-Phase 05 is the only active phase and is now authorized. Reconcile the full
-test matrix against valid Phase 00–04 evidence first, then execute only Phase
-05 resilience/acceptance work.
+Phase 05 is the only active phase and its runtime/evidence work is complete;
+the plan is now `READY FOR SOL FINAL AUDIT`. Do not merge, archive, or close
+the plan before Sol completes the final audit.

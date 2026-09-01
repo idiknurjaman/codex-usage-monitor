@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring — Test Matrix
 
 **Plan:** `2s-multi-account-monitoring`
-**Status:** `Phase 04 PASS; Phase 05 active`
+**Status:** `Phase 04 PASS; Phase 05 ready for Sol final audit`
 **Product policy:** maximum four retained accounts; collection-driven/N-capable implementation
 
 Evidence must be current to the exact implementation checkpoint under review. Historical PASS results prove only their historical checkpoints and do not prove the amended account model.
@@ -59,8 +59,8 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | UI-13 | Failure state | One account unavailable | Healthy accounts remain readable; failed account explicit | Class R — PASS bounded: inactive ownerless re-auth-required and independent-owner health accepted; transient isolation remains Class F/S |
 | UI-14 | Overflow state | Four retained + current-only E | Current identity remains understandable; no retained account silently dropped | Class F/S — PASS: current-only overflow fixture; no real E claim |
 | UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class F/S — PASS for scalable geometry; no deliberate owner multi-DPI walkthrough claimed |
-| UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
-| UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
+| UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | Class R — PASS bounded: diagnostic runtime recorded two taskbars, selection of index 1 with repositioning, then return to index 0 |
+| UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | Class R — PASS bounded: controlled Explorer restart produced a new 2S process, a new taskbar selection with `count=2`, and `window shown` |
 | UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class R — PASS bounded: Sidik confirmed light-theme tooltip/native menu behavior; bar/background theme is outside plan and non-blocking |
 | UI-19 | Three accounts | Real taskbar smoke after normal Codex discovery | Third account renders as a distinct block; returning to account 1 leaves account 3 retained and ownerless-inactive without credential borrowing | Class R — PASS bounded: third account discovered by becoming current; after return to account 1 it remained retained and entered `Re-authentication required` |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | Class S — PASS: collection/N-capable account model with max-four policy |

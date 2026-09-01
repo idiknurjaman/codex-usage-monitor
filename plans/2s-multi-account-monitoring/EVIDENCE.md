@@ -753,22 +753,50 @@ still have a focused owner visual check open; Phase 05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 
-**Status:** `active/in-progress`
+**Status:** `ready-for-sol-final-audit`
 
-Phase 05 is authorized after the Phase 04 PASS. Reconcile the entire test
-matrix against valid Phase 00–04 evidence before adding new runtime proof.
+Phase 05 is authorized after the Phase 04 PASS. The full matrix has been
+reconciled against valid Phase 00–04 evidence and the two resilience rows now
+have bounded Class R runtime proof. Sol final audit is pending.
 
 #### Phase 05 pre-runtime matrix reconciliation
 
 All current matrix rows are reconciled to valid Phase 00–04 Class R/F/S
-evidence except `UI-16` taskbar drag/multi-monitor placement and `UI-17`
-Explorer/taskbar restart. Those two resilience rows remain explicitly pending
-for new Phase 05 runtime proof; no historical or fixture evidence is being
-used to close them.
+evidence except no current Phase 05 matrix rows. `UI-16` has bounded Class R
+diagnostic runtime evidence: the current diagnostic log recorded two taskbars,
+selection and repositioning on taskbar index 1, and a return to index 0.
+`UI-17` now has bounded Class R runtime evidence from a controlled Explorer
+restart; no historical or fixture evidence is being used to close either row.
+
+#### Phase 05 runtime proof
+
+`UI-16` is `PASS bounded` from the diagnostic runtime sequence described
+above. The evidence demonstrates collection/taskbar attachment across the two
+available taskbars without changing auth, polling, or account ownership.
+
+`UI-17` is `PASS bounded`: the controlled shell restart terminated the
+pre-existing Explorer process, Explorer returned, and the prior 2S process was
+replaced by a new process. The new diagnostic interval recorded a fresh
+taskbar selection with `count=2`, a new embedded position, and `window shown`.
+The watchdog marker itself is not retained because the relaunched process
+reinitializes the diagnostic file; the PID/startup transition and taskbar
+reattachment are the recorded runtime proof. No account or credential data was
+included.
+
+#### Phase 05 verification
+
+The source remained unchanged at implementation checkpoint
+`1cda2b33c7ed30166f364b26687a8876d347865d` during Phase 05 runtime work.
+
+- `cargo fmt --check`: PASS.
+- `cargo test`: PASS — 91 passed, 0 failed.
+- `cargo clippy --all-targets`: PASS exit; existing repository warnings only.
+- `cargo build --release`: PASS — optimized release build completed.
+- `git diff --check`: PASS before the final evidence checkpoint.
 
 ## Final audit
 
-**Sol verdict:** `Phase 04 PASS; Phase 05 active`
+**Sol verdict:** `Phase 04 PASS; Phase 05 ready for Sol final audit`
 
 Do not close the plan until Phase 05 has current TEST-MATRIX evidence and Sol's
 final audit.
