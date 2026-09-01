@@ -61,7 +61,7 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class F/S — PASS for scalable geometry; no deliberate owner multi-DPI walkthrough claimed |
 | UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
 | UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
-| UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class R — PASS bounded: current-build tooltip/menu polish accepted; no separate light-theme visual walkthrough claimed |
+| UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class R — PASS bounded: Sidik confirmed light-theme tooltip/native menu behavior; bar/background theme is outside plan and non-blocking |
 | UI-19 | Three accounts | Real taskbar smoke after normal Codex discovery | Third account renders as a distinct block; returning to account 1 leaves account 3 retained and ownerless-inactive without credential borrowing | Class R — PASS bounded: third account discovered by becoming current; after return to account 1 it remained retained and entered `Re-authentication required` |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | pending |
 | ARCH-02 | Routing | Inspect lifecycle/menu/poll/render code | No `account_a/b`, per-slot poll functions, or fixed per-slot command branches | pending |

@@ -699,7 +699,7 @@ behavior.
 | Account-scoped tooltip/privacy and direct menu | PASS | Current and monitored tooltips remained account-scoped and privacy-safe; direct Accounts menu remained correct. |
 | Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
 | Tooltip border removal and final tooltip polish | PASS | Sidik accepted the current build's rounded, borderless tooltip, spacing, typography, and column layout. |
-| Native menu theme and final menu polish | PASS bounded | Sidik accepted the current build's native menu behavior and polish; no separate light-theme visual walkthrough is claimed because it was not explicitly exercised. |
+| Native menu theme and final menu polish | PASS bounded | Sidik confirmed the current build's tooltip and native menu behavior under the light Windows theme. Bar/background theme behavior is not claimed because it is outside this plan and non-blocking. |
 | Larger account initial chip | PASS with non-blocking preference | Sidik accepted the 24 px chip visually, while noting it still feels slightly small. |
 | Real three-account taskbar smoke | PASS | A third account was discovered by becoming current in normal Codex; the three account blocks rendered as a real taskbar smoke state. |
 | Third account ownerless inactive transition | PASS | After normal Codex returned from account 3 to account 1, account 3 remained retained and correctly entered `Re-authentication required` without an independent monitor owner; no credential borrowing occurred. |
@@ -716,8 +716,9 @@ not a visual owner acceptance claim: the existing 2S instance held the
 single-instance mutex when the rebuilt corrected binary was launched, and the
 shell capture helper could not capture desktop pixels. The light-theme path is
 covered by the system-following mode contract and explicit missing-export
-fallback tests; light/dark visual owner confirmation remains open for
-Sol/Sidik.
+fallback tests. Sidik has now confirmed the light-theme tooltip and native
+menu behavior. No separate owner acceptance is claimed for the bar/background
+theme, which is outside the current plan and is non-blocking.
 
 No new runtime claim is made for Explorer/taskbar restart, four-account real
 cardinality, same-initial real accounts, or a deliberately exercised
