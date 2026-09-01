@@ -44,8 +44,8 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | LIFE-08 | Restart | Restart after mixed auto/manual discovery | Retained identities restore; active role recomputed from current Codex | pending |
 | LIFE-09 | Max four | Retain A/B/C/D through valid paths | Four retained identities supported without structural slot hard-coding | pending |
 | LIFE-10 | Current overflow | With A/B/C/D retained, Codex changes to E | E current-only; A/B/C/D retained; user can free capacity explicitly | pending |
-| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS: remaining-fill regression covers 81→19 and 55→45; owner taskbar runtime pending |
-| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS: remaining-fill regression covers Circle input boundary; owner taskbar runtime pending |
+| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS: remaining-fill and two-digit-countdown width regressions cover 81→19, 55→45, and 29d; owner taskbar runtime pending |
+| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS: remaining-fill and account text-width regressions cover Circle input boundary; owner taskbar runtime pending |
 | UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | Class F/S — PASS; owner taskbar runtime pending |
 | UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | Class S — PASS; owner tooltip runtime pending |
 | UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | Class S — PASS; owner tooltip runtime pending |
@@ -67,7 +67,7 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | MIG-01 | Settings | Existing settings without registry | App starts with valid working-account behavior | pending |
 | MIG-02 | Two-slot metadata | Existing Phase-01/02 `slot-1/slot-2` settings | Migrates/reconstructs safely into generalized owner-handle model | pending |
 | BUILD-01 | Formatting | `cargo fmt --check` | PASS | Class S — PASS at `acb870d204d83bcba71534aeab5910784e74b1c1` |
-| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 85/85 tests at `82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a` |
+| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 86/86 tests at `10afd36e9495b0c59571e70bf593af9a19d5a7ec` |
 | BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | Class S — PASS exit; existing warnings only |
 | BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: default optimized release build completed |
 | BUILD-05 | Diff hygiene | `git diff --check` | PASS | Class S — PASS |

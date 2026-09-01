@@ -7,8 +7,8 @@
 - **Current phase:** `04-taskbar-ui`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a`
-- **Deterministic proof/test checkpoint:** `82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a`
+- **Implementation checkpoint:** `10afd36e9495b0c59571e70bf593af9a19d5a7ec`
+- **Deterministic proof/test checkpoint:** `10afd36e9495b0c59571e70bf593af9a19d5a7ec`
 
 ## Baseline evidence
 
@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a`.
+Implementation checkpoint: `10afd36e9495b0c59571e70bf593af9a19d5a7ec`.
 Phase 04 source and deterministic visual/state evidence are complete; owner
 runtime acceptance remains for Sol's final gate.
 
@@ -600,6 +600,8 @@ runtime acceptance remains for Sol's final gate.
 - Account Bar/Circle fill receives remaining percentage explicitly at the
   presentation boundary; canonical used values are not passed directly to the
   visual fill.
+- Account collection blocks reserve an additional 8 px in the usage text
+  column so two-digit reset countdowns such as `29d` are not clipped.
 - Active state is derived by stable identity matching. The active identity chip
   uses a blue outline/ring; inactive chips use the neutral outline. No active
   role is persisted and no account switching control was added.
@@ -632,6 +634,7 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | `window::tests::hover_hit_test_covers_the_entire_account_block` | Initial, quota rows, bars/circles, reset areas, and the full vertical block resolve to the same account hit region. |
 | `window::tests::account_tooltip_uses_role_usage_and_status_without_identity_secrets` | Tooltip hierarchy includes role, active marker, remaining 5h/weekly values, and status without stable ID. |
 | `window::tests::account_bar_and_circle_use_remaining_percentage_for_fill` | Account Bar/Circle fill and text use 81 used → 19 remaining, 55 used → 45 remaining, with 0/100 boundaries. |
+| `window::tests::account_layout_reserves_width_for_two_digit_reset_countdown` | Account collection usage text reserves enough width for a two-digit countdown such as `52% · 29d`. |
 | `window::tests::tooltip_reset_uses_human_date_and_relative_countdown` | Same-day and later-date reset labels use human-readable local dates and relative countdowns. |
 | `window::tests::tooltip_columns_use_fixed_positions_without_monospace_padding` | Label, percentage, and reset columns have deterministic X positions. |
 | `window::tests::tooltip_distinguishes_ownerless_active_from_inactive_and_transient_states` | Active ownerless, inactive ownerless, and transient failure states map to their locked tooltip semantics. |
@@ -667,7 +670,7 @@ remains unchanged and is not reclassified by this UI checkpoint.
 #### Verification
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 85 passed, 0 failed.
+- `cargo test --locked`: PASS — 86 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing repository
   warnings remain, with no new compile error.
 - `cargo build --release`: PASS — default optimized release build after the
@@ -682,7 +685,7 @@ Phase 05 remains blocked.
 
 **Decision:** `READY FOR SOL FINAL GATE` — Class S/F UI implementation and
 deterministic evidence are complete at
-`82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a`. Class R owner runtime acceptance
+`10afd36e9495b0c59571e70bf593af9a19d5a7ec`. Class R owner runtime acceptance
 is not claimed yet.
 
 ### Phase 05 — Resilience & Acceptance
