@@ -1578,8 +1578,8 @@ const CIRCLE_DIAMETER: i32 = 12;
 const CIRCLE_STROKE: i32 = 2;
 const CIRCLE_LABEL_RIGHT_MARGIN: i32 = 4;
 const CIRCLE_INDICATOR_RIGHT_MARGIN: i32 = 4;
-const ACCOUNT_INITIAL_DIAMETER: i32 = 16;
-const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 18;
+const ACCOUNT_INITIAL_DIAMETER: i32 = 18;
+const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 20;
 const ACCOUNT_INITIAL_GAP: i32 = 4;
 const ACCOUNT_BLOCK_GAP: i32 = 8;
 const ACCOUNT_TEXT_EXTRA_WIDTH: i32 = 8;
@@ -6895,6 +6895,18 @@ mod tests {
 
         assert!(widths.windows(2).all(|pair| pair[1] > pair[0]));
         assert_eq!(WIDGET_HEIGHT, 46);
+    }
+
+    #[test]
+    fn account_initial_chip_is_larger_without_collapsing_text_spacing() {
+        assert_eq!(ACCOUNT_INITIAL_DIAMETER, 18);
+        assert_eq!(ACCOUNT_INITIAL_SLOT_WIDTH, 20);
+        assert_eq!(
+            account_identity_slot_width(),
+            sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP)
+        );
+        assert!(account_identity_slot_width() > sc(ACCOUNT_INITIAL_DIAMETER));
+        assert!(sc(ACCOUNT_INITIAL_DIAMETER) < WIDGET_HEIGHT);
     }
 
     #[test]
