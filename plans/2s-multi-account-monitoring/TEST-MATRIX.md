@@ -44,8 +44,8 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | LIFE-08 | Restart | Restart after mixed auto/manual discovery | Retained identities restore; active role recomputed from current Codex | pending |
 | LIFE-09 | Max four | Retain A/B/C/D through valid paths | Four retained identities supported without structural slot hard-coding | pending |
 | LIFE-10 | Current overflow | With A/B/C/D retained, Codex changes to E | E current-only; A/B/C/D retained; user can free capacity explicitly | pending |
-| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS; owner taskbar runtime pending |
-| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS; owner taskbar runtime pending |
+| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS: remaining-fill regression covers 81→19 and 55→45; owner taskbar runtime pending |
+| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS: remaining-fill regression covers Circle input boundary; owner taskbar runtime pending |
 | UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | Class F/S — PASS; owner taskbar runtime pending |
 | UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | Class S — PASS; owner tooltip runtime pending |
 | UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | Class S — PASS; owner tooltip runtime pending |
@@ -67,9 +67,9 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | MIG-01 | Settings | Existing settings without registry | App starts with valid working-account behavior | pending |
 | MIG-02 | Two-slot metadata | Existing Phase-01/02 `slot-1/slot-2` settings | Migrates/reconstructs safely into generalized owner-handle model | pending |
 | BUILD-01 | Formatting | `cargo fmt --check` | PASS | Class S — PASS at `acb870d204d83bcba71534aeab5910784e74b1c1` |
-| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 76/76 tests at `acb870d204d83bcba71534aeab5910784e74b1c1` |
+| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 81/81 tests at `673d97b7f4e485224e5baee540caee885d8163c3` |
 | BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | Class S — PASS exit; existing warnings only |
-| BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: optimized release build completed |
+| BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: alternate optimized release build completed; default output was locked |
 | BUILD-05 | Diff hygiene | `git diff --check` | PASS | Class S — PASS |
 | SEC-01 | Working state | Compare normal Codex state before/after lifecycle | Auth/session/history/config source of truth not mutated by monitor management | pending |
 | SEC-02 | Token ownership | Review monitor owners | No refresh token duplicated across independently refreshing owners | pending |

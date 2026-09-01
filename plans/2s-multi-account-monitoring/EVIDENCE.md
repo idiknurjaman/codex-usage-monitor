@@ -7,8 +7,8 @@
 - **Current phase:** `04-taskbar-ui`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`
-- **Deterministic proof/test checkpoint:** `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`
+- **Implementation checkpoint:** `673d97b7f4e485224e5baee540caee885d8163c3`
+- **Deterministic proof/test checkpoint:** `673d97b7f4e485224e5baee540caee885d8163c3`
 
 ## Baseline evidence
 
@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`.
+Implementation checkpoint: `673d97b7f4e485224e5baee540caee885d8163c3`.
 Phase 04 source and deterministic visual/state evidence are complete; owner
 runtime acceptance remains for Sol's final gate.
 
@@ -597,6 +597,9 @@ runtime acceptance remains for Sol's final gate.
 - Bar and Circle both render one two-row Codex block per account. Width is
   calculated from collection length and grows horizontally; taskbar height
   remains `WIDGET_HEIGHT = 46` at the tested 100% DPI baseline.
+- Account Bar/Circle fill receives remaining percentage explicitly at the
+  presentation boundary; canonical used values are not passed directly to the
+  visual fill.
 - Active state is derived by stable identity matching. The active identity chip
   uses a blue outline/ring; inactive chips use the neutral outline. No active
   role is persisted and no account switching control was added.
@@ -621,6 +624,7 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | `window::tests::collection_width_grows_horizontally_without_changing_taskbar_height` | Collection width grows for 1–4 accounts while the taskbar widget height remains 46 px. |
 | `window::tests::hover_hit_test_covers_the_entire_account_block` | Initial, quota rows, bars/circles, reset areas, and the full vertical block resolve to the same account hit region. |
 | `window::tests::account_tooltip_uses_role_usage_and_status_without_identity_secrets` | Tooltip hierarchy includes role, active marker, remaining 5h/weekly values, and status without stable ID. |
+| `window::tests::account_bar_and_circle_use_remaining_percentage_for_fill` | Account Bar/Circle fill and text use 81 used → 19 remaining, 55 used → 45 remaining, with 0/100 boundaries. |
 | Existing `window::tests::widget_style_serializes_and_defaults_to_bar` | Bar remains the default and Circle remains persisted through settings serialization. |
 | Existing menu/routing tests | Direct per-account submenu, dynamic stable-identity routing, max-four Add disablement, and no fixed-slot command path remain green. |
 
@@ -652,13 +656,14 @@ remains unchanged and is not reclassified by this UI checkpoint.
 #### Verification
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 80 passed, 0 failed.
+- `cargo test --locked`: PASS — 81 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing repository
   warnings remain, with no new compile error.
-- `cargo build --release`: PASS — default optimized release build.
+- `cargo build --release`: final source build was blocked from replacing
+  the locked default `target\\release\\codex-usage.exe`.
 - Alternate release build: PASS at the disposable
-  `target-phase04-release` target; the resulting binary was used for the
-  visual captures and the disposable target was removed afterward.
+  `target-phase04-final` target after the bar correction; the target was
+  removed afterward.
 - `git diff --check`: PASS before checkpoint.
 
 #### Scope guard and disposition
@@ -669,7 +674,7 @@ Phase 05 remains blocked.
 
 **Decision:** `READY FOR SOL FINAL GATE` — Class S/F UI implementation and
 deterministic evidence are complete at
-`8adcd0612538d9e5125dcf52ea93d7171fbda5a7`. Class R owner runtime acceptance
+`673d97b7f4e485224e5baee540caee885d8163c3`. Class R owner runtime acceptance
 is not claimed yet.
 
 ### Phase 05 — Resilience & Acceptance
