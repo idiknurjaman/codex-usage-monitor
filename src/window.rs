@@ -13,7 +13,9 @@ use windows::Win32::System::Registry::*;
 use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
 use windows::Win32::UI::Accessibility::HWINEVENTHOOK;
 use windows::Win32::UI::HiDpi::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::Shell::ExtractIconExW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -72,6 +74,10 @@ struct AppState {
     account_login: Option<account::LoginOperation>,
     account_cleanup: Option<account::CleanupOperation>,
     account_initial_usage: Option<account::InitialUsageOperation>,
+    tooltip_hwnd: Option<HWND>,
+    tooltip_pending_account_id: Option<String>,
+    tooltip_visible_account_id: Option<String>,
+    tooltip_text: String,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -144,6 +150,18 @@ struct AccountMenuEntry {
     retained: bool,
 }
 
+#[derive(Clone)]
+struct AccountRenderData {
+    id: String,
+    initial: Option<char>,
+    display_name: Option<String>,
+    usage: Option<crate::models::UsageData>,
+    usage_stale: bool,
+    connection_state: account::ConnectionState,
+    active: bool,
+    current_only: bool,
+}
+
 const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
 
 const POLL_1_MIN: u32 = 60_000;
@@ -185,8 +203,11 @@ const IDM_STYLE_CIRCLE: u16 = 91;
 const IDM_ACCOUNT_ADD: u16 = 100;
 const IDM_ACCOUNT_CANCEL: u16 = 101;
 const IDM_ACCOUNT_ACTION_BASE: u16 = 110;
+const TIMER_TOOLTIP: usize = 6;
+const TOOLTIP_DELAY_MS: u32 = 450;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
+const WM_MOUSELEAVE_MSG: u32 = 0x02A3;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
 const TRAY_ICON_UPDATE_REPOSITION_SUPPRESS_MS: u64 = 750;
 
@@ -1540,6 +1561,7 @@ const CIRCLE_INDICATOR_RIGHT_MARGIN: i32 = 4;
 const ACCOUNT_INITIAL_DIAMETER: i32 = 16;
 const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 18;
 const ACCOUNT_INITIAL_GAP: i32 = 4;
+const ACCOUNT_BLOCK_GAP: i32 = 8;
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
     let divider_h = sc(25);
@@ -1596,6 +1618,129 @@ fn usage_percent_for_display(
     }
 }
 
+fn account_render_data(state: &AppState) -> Vec<AccountRenderData> {
+    account_render_data_for(
+        &state.account_registry,
+        state.current_working_identity.as_ref(),
+        state.data.as_ref().and_then(|data| data.codex.as_ref()),
+        state.last_poll_ok,
+    )
+}
+
+fn account_render_data_for(
+    registry: &account::AccountRegistry,
+    current_identity: Option<&account::AccountIdentity>,
+    current_usage: Option<&crate::models::UsageData>,
+    current_usage_available: bool,
+) -> Vec<AccountRenderData> {
+    let current_id = current_identity.map(|identity| identity.id.as_str());
+    let mut accounts = registry
+        .accounts()
+        .iter()
+        .map(|account| AccountRenderData {
+            id: account.id.clone(),
+            initial: account.initial,
+            display_name: account.display_name.clone(),
+            usage: account.usage.clone(),
+            usage_stale: account.usage_stale,
+            connection_state: account.connection_state,
+            active: Some(account.id.as_str()) == current_id,
+            current_only: false,
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(identity) = current_identity {
+        if accounts.iter().all(|account| account.id != identity.id) {
+            let usage = current_usage_available
+                .then(|| current_usage.cloned())
+                .flatten();
+            accounts.push(AccountRenderData {
+                id: identity.id.clone(),
+                initial: identity.initial(),
+                display_name: identity.display_name.clone(),
+                usage,
+                usage_stale: false,
+                connection_state: if current_usage_available {
+                    account::ConnectionState::Connected
+                } else {
+                    account::ConnectionState::Unavailable
+                },
+                active: true,
+                current_only: true,
+            });
+        }
+    }
+
+    accounts
+}
+
+fn account_identity_slot_width() -> i32 {
+    sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP)
+}
+
+fn account_block_width(language: LanguageId, widget_style: WidgetStyle) -> i32 {
+    let (label_width, text_width) = usage_layout_widths(language);
+    let provider_width = if widget_style == WidgetStyle::Circle {
+        circle_provider_width(text_width)
+    } else {
+        model_usage_width(row_bar_segment_count(1), text_width)
+    };
+    account_identity_slot_width()
+        + sc(label_width)
+        + if widget_style == WidgetStyle::Circle {
+            sc(CIRCLE_LABEL_RIGHT_MARGIN)
+        } else {
+            sc(LABEL_RIGHT_MARGIN)
+        }
+        + provider_width
+}
+
+fn provider_group_width(
+    active_models: i32,
+    language: LanguageId,
+    widget_style: WidgetStyle,
+) -> i32 {
+    let active_models = active_models.max(1);
+    let (label_width, text_width) = usage_layout_widths(language);
+    let provider_width = if widget_style == WidgetStyle::Circle {
+        circle_provider_width(text_width)
+    } else {
+        model_usage_width(row_bar_segment_count(active_models), text_width)
+    };
+    sc(label_width)
+        + if widget_style == WidgetStyle::Circle {
+            sc(CIRCLE_LABEL_RIGHT_MARGIN)
+        } else {
+            sc(LABEL_RIGHT_MARGIN)
+        }
+        + provider_width * active_models
+        + sc(MODEL_RIGHT_MARGIN) * (active_models - 1)
+}
+
+fn total_account_collection_width(
+    account_count: usize,
+    language: LanguageId,
+    widget_style: WidgetStyle,
+    non_codex_models: i32,
+) -> i32 {
+    let accounts_width = account_count as i32 * account_block_width(language, widget_style)
+        + sc(ACCOUNT_BLOCK_GAP) * account_count.saturating_sub(1) as i32;
+    let non_codex_width = if non_codex_models > 0 {
+        sc(ACCOUNT_BLOCK_GAP) + provider_group_width(non_codex_models, language, widget_style)
+    } else {
+        0
+    };
+    sc(LEFT_DIVIDER_W)
+        + sc(DIVIDER_RIGHT_MARGIN)
+        + accounts_width
+        + non_codex_width
+        + sc(RIGHT_MARGIN)
+}
+
+fn account_collection_is_visible(state: &AppState) -> bool {
+    state.show_codex && !account_render_data(state).is_empty()
+}
+
 fn total_widget_width_for(
     active_models: i32,
     language: LanguageId,
@@ -1626,6 +1771,19 @@ fn total_widget_width_for(
 }
 
 fn total_widget_width_for_state(state: &AppState) -> i32 {
+    if account_collection_is_visible(state) {
+        let non_codex_models = if state.show_claude_code || state.show_antigravity {
+            active_model_count(state.show_claude_code, false, state.show_antigravity)
+        } else {
+            0
+        };
+        return total_account_collection_width(
+            account_render_data(state).len(),
+            state.language,
+            state.widget_style,
+            non_codex_models,
+        );
+    }
     total_widget_width_for(
         active_model_count(
             state.show_claude_code,
@@ -1644,25 +1802,11 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
 }
 
 fn total_widget_width() -> i32 {
-    let (active_models, language, widget_style, account_initial) = {
-        let state = lock_state();
-        state
-            .as_ref()
-            .map(|s| {
-                (
-                    active_model_count(s.show_claude_code, s.show_codex, s.show_antigravity),
-                    s.language,
-                    s.widget_style,
-                    s.account_registry.display_initial(
-                        s.current_working_identity
-                            .as_ref()
-                            .and_then(account::AccountIdentity::initial),
-                    ),
-                )
-            })
-            .unwrap_or((1, LanguageId::English, WidgetStyle::Bar, None))
-    };
-    total_widget_width_for(active_models, language, widget_style, account_initial)
+    let state = lock_state();
+    state
+        .as_ref()
+        .map(total_widget_width_for_state)
+        .unwrap_or_else(|| total_widget_width_for(1, LanguageId::English, WidgetStyle::Bar, None))
 }
 
 fn claude_accent_color() -> Color {
@@ -1762,6 +1906,23 @@ fn widget_background_color(is_dark: bool, supports_alpha: bool) -> Color {
     }
 }
 
+fn register_tooltip_window_class(hinstance: HINSTANCE) {
+    let class_name = native_interop::wide_str("CodexUsageTooltip");
+    unsafe {
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(tooltip_wnd_proc),
+            hInstance: hinstance,
+            hCursor: LoadCursorW(HINSTANCE::default(), IDC_ARROW).unwrap_or_default(),
+            hbrBackground: HBRUSH(std::ptr::null_mut()),
+            lpszClassName: PCWSTR::from_raw(class_name.as_ptr()),
+            ..Default::default()
+        };
+        let _ = RegisterClassExW(&wc);
+    }
+}
+
 fn antigravity_usage_text_color(is_dark: bool) -> Color {
     if is_dark {
         Color::from_hex("#8AB4F8")
@@ -1839,6 +2000,7 @@ pub fn run() {
         if atom == 0 {
             diagnose::log("RegisterClassExW returned 0");
         }
+        register_tooltip_window_class(HINSTANCE(hinstance.0));
 
         let claude_code_available = poller::claude_code_credentials_available();
         let settings = load_settings(claude_code_available);
@@ -1930,6 +2092,10 @@ pub fn run() {
                 account_login: None,
                 account_cleanup: None,
                 account_initial_usage: None,
+                tooltip_hwnd: None,
+                tooltip_pending_account_id: None,
+                tooltip_visible_account_id: None,
+                tooltip_text: String::new(),
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -2086,6 +2252,7 @@ fn render_layered() {
         show_session_window,
         show_weekly_window,
         widget_style,
+        account_views,
         account_initial,
     ) = {
         let state = lock_state();
@@ -2114,6 +2281,7 @@ fn render_layered() {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
+                account_render_data(s),
                 s.account_registry.display_initial(
                     s.current_working_identity
                         .as_ref()
@@ -2125,17 +2293,19 @@ fn render_layered() {
     };
 
     let hwnd = hwnd_val.to_hwnd();
+    let width = total_widget_width();
+    let height = sc(WIDGET_HEIGHT);
 
     // For non-embedded fallback, just invalidate and let WM_PAINT handle it
     if !embedded {
+        if let Some(rect) = native_interop::get_window_rect_safe(hwnd) {
+            native_interop::move_window(hwnd, rect.left, rect.top, width, height);
+        }
         unsafe {
             let _ = InvalidateRect(hwnd, None, false);
         }
         return;
     }
-
-    let width = total_widget_width();
-    let height = sc(WIDGET_HEIGHT);
 
     let accent = claude_accent_color();
     let codex_accent = codex_accent_color(is_dark);
@@ -2215,6 +2385,7 @@ fn render_layered() {
             show_session_window,
             show_weekly_window,
             widget_style,
+            &account_views,
             account_initial,
             &codex_accent,
             &antigravity_accent,
@@ -2299,6 +2470,7 @@ fn paint_content(
     show_session_window: bool,
     show_weekly_window: bool,
     widget_style: WidgetStyle,
+    account_views: &[AccountRenderData],
     account_initial: Option<char>,
     codex_accent: &Color,
     antigravity_accent: &Color,
@@ -2384,17 +2556,49 @@ fn paint_content(
         );
         let old_font = SelectObject(hdc, font);
 
-        if let Some(initial) = account_initial {
-            draw_account_initial(
-                hdc,
-                content_origin_x,
-                (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
-                initial,
-                is_dark,
-            );
+        let render_account_collection = show_codex && !account_views.is_empty();
+        if !render_account_collection {
+            if let Some(initial) = account_initial {
+                draw_account_initial(
+                    hdc,
+                    content_origin_x,
+                    (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
+                    initial,
+                    is_dark,
+                    false,
+                );
+            }
         }
 
-        if widget_style == WidgetStyle::Circle {
+        if render_account_collection {
+            draw_account_collection(
+                hdc,
+                height,
+                is_dark,
+                language,
+                strings,
+                widget_style,
+                account_views,
+                session_pct,
+                session_text,
+                weekly_pct,
+                weekly_text,
+                antigravity_session_pct,
+                antigravity_session_text,
+                antigravity_weekly_pct,
+                antigravity_weekly_text,
+                show_claude_code,
+                show_antigravity,
+                show_session_window,
+                show_weekly_window,
+                accent,
+                codex_accent,
+                antigravity_accent,
+                track,
+                label_width,
+                text_width,
+            );
+        } else if widget_style == WidgetStyle::Circle {
             if show_session_window {
                 draw_circle_row(
                     hdc,
@@ -2508,6 +2712,669 @@ fn paint_content(
             }
         }
 
+        SelectObject(hdc, old_font);
+        let _ = DeleteObject(font);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_account_collection(
+    hdc: HDC,
+    height: i32,
+    is_dark: bool,
+    language: LanguageId,
+    strings: Strings,
+    widget_style: WidgetStyle,
+    accounts: &[AccountRenderData],
+    session_pct: Option<f64>,
+    session_text: &str,
+    weekly_pct: Option<f64>,
+    weekly_text: &str,
+    antigravity_session_pct: Option<f64>,
+    antigravity_session_text: &str,
+    antigravity_weekly_pct: Option<f64>,
+    antigravity_weekly_text: &str,
+    show_claude_code: bool,
+    show_antigravity: bool,
+    show_session_window: bool,
+    show_weekly_window: bool,
+    claude_accent: &Color,
+    codex_accent: &Color,
+    antigravity_accent: &Color,
+    track: &Color,
+    label_width: i32,
+    text_width: i32,
+) {
+    let content_origin_x = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
+    let row_height = sc(ROW_HEIGHT);
+    let row_gap = sc(ROW_GAP);
+    let rows_height = row_height * 2 + row_gap;
+    let row1_y = (height - rows_height) / 2;
+    let row2_y = row1_y + row_height + row_gap;
+    let single_row_y = (height - row_height) / 2;
+    let account_width = account_block_width(language, widget_style);
+    let show_non_codex = show_claude_code || show_antigravity;
+    let display_remaining_in_chinese = language == LanguageId::SimplifiedChinese;
+    let mut block_x = content_origin_x;
+
+    for (index, account) in accounts.iter().enumerate() {
+        if let Some(initial) = account.initial {
+            draw_account_initial(
+                hdc,
+                block_x,
+                (height - sc(ACCOUNT_INITIAL_DIAMETER)) / 2,
+                initial,
+                is_dark,
+                account.active,
+            );
+        }
+
+        let rows_x = block_x + account_identity_slot_width();
+        let usage = account.usage.as_ref().filter(|_| !account.usage_stale);
+        let (account_session_pct, account_session_text) = account_usage_display(
+            usage,
+            strings,
+            display_remaining_in_chinese,
+            poller::UsageWindowKind::Session,
+        );
+        let (account_weekly_pct, account_weekly_text) = account_usage_display(
+            usage,
+            strings,
+            display_remaining_in_chinese,
+            poller::UsageWindowKind::Weekly,
+        );
+
+        if widget_style == WidgetStyle::Circle {
+            if show_session_window {
+                draw_circle_row(
+                    hdc,
+                    rows_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    label_width,
+                    text_width,
+                    None,
+                    "--",
+                    account_session_pct,
+                    &account_session_text,
+                    None,
+                    "--",
+                    false,
+                    true,
+                    false,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+            if show_weekly_window {
+                draw_circle_row(
+                    hdc,
+                    rows_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    label_width,
+                    text_width,
+                    None,
+                    "--",
+                    account_weekly_pct,
+                    &account_weekly_text,
+                    None,
+                    "--",
+                    false,
+                    true,
+                    false,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+        } else {
+            if show_session_window {
+                draw_row(
+                    hdc,
+                    rows_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    None,
+                    "--",
+                    account_session_pct,
+                    &account_session_text,
+                    None,
+                    "--",
+                    false,
+                    true,
+                    false,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
+            if show_weekly_window {
+                draw_row(
+                    hdc,
+                    rows_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    None,
+                    "--",
+                    account_weekly_pct,
+                    &account_weekly_text,
+                    None,
+                    "--",
+                    false,
+                    true,
+                    false,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
+        }
+
+        block_x += account_width;
+        if index + 1 < accounts.len() || show_non_codex {
+            block_x += sc(ACCOUNT_BLOCK_GAP);
+        }
+    }
+
+    if show_non_codex {
+        if widget_style == WidgetStyle::Circle {
+            if show_session_window {
+                draw_circle_row(
+                    hdc,
+                    block_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    label_width,
+                    text_width,
+                    if show_claude_code { session_pct } else { None },
+                    session_text,
+                    None,
+                    "--",
+                    if show_antigravity {
+                        antigravity_session_pct
+                    } else {
+                        None
+                    },
+                    antigravity_session_text,
+                    show_claude_code,
+                    false,
+                    show_antigravity,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+            if show_weekly_window {
+                draw_circle_row(
+                    hdc,
+                    block_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    label_width,
+                    text_width,
+                    if show_claude_code { weekly_pct } else { None },
+                    weekly_text,
+                    None,
+                    "--",
+                    if show_antigravity {
+                        antigravity_weekly_pct
+                    } else {
+                        None
+                    },
+                    antigravity_weekly_text,
+                    show_claude_code,
+                    false,
+                    show_antigravity,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                );
+            }
+        } else {
+            if show_session_window {
+                draw_row(
+                    hdc,
+                    block_x,
+                    if show_weekly_window {
+                        row1_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.session_window,
+                    if show_claude_code { session_pct } else { None },
+                    session_text,
+                    None,
+                    "--",
+                    if show_antigravity {
+                        antigravity_session_pct
+                    } else {
+                        None
+                    },
+                    antigravity_session_text,
+                    show_claude_code,
+                    false,
+                    show_antigravity,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
+            if show_weekly_window {
+                draw_row(
+                    hdc,
+                    block_x,
+                    if show_session_window {
+                        row2_y
+                    } else {
+                        single_row_y
+                    },
+                    is_dark,
+                    strings.weekly_window,
+                    if show_claude_code { weekly_pct } else { None },
+                    weekly_text,
+                    None,
+                    "--",
+                    if show_antigravity {
+                        antigravity_weekly_pct
+                    } else {
+                        None
+                    },
+                    antigravity_weekly_text,
+                    show_claude_code,
+                    false,
+                    show_antigravity,
+                    claude_accent,
+                    codex_accent,
+                    antigravity_accent,
+                    track,
+                    label_width,
+                    text_width,
+                );
+            }
+        }
+    }
+}
+
+fn account_usage_display(
+    usage: Option<&crate::models::UsageData>,
+    strings: Strings,
+    display_remaining_in_chinese: bool,
+    window: poller::UsageWindowKind,
+) -> (Option<f64>, String) {
+    let Some(usage) = usage else {
+        return (None, "--".to_string());
+    };
+    let section = match window {
+        poller::UsageWindowKind::Session => &usage.session,
+        poller::UsageWindowKind::Weekly => &usage.weekly,
+    };
+    (
+        section.used_percentage,
+        poller::format_remaining_line(section, strings, display_remaining_in_chinese, window),
+    )
+}
+
+fn account_id_at_point(state: &AppState, client_x: i32, client_y: i32) -> Option<String> {
+    if !account_collection_is_visible(state) || client_y < 0 || client_y >= sc(WIDGET_HEIGHT) {
+        return None;
+    }
+
+    account_id_at_point_for(
+        &account_render_data(state),
+        client_x,
+        client_y,
+        state.language,
+        state.widget_style,
+    )
+}
+
+fn account_id_at_point_for(
+    accounts: &[AccountRenderData],
+    client_x: i32,
+    client_y: i32,
+    language: LanguageId,
+    widget_style: WidgetStyle,
+) -> Option<String> {
+    if client_y < 0 || client_y >= sc(WIDGET_HEIGHT) {
+        return None;
+    }
+    let mut block_x = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
+    let block_width = account_block_width(language, widget_style);
+    for account in accounts {
+        if (block_x..block_x + block_width).contains(&client_x) {
+            return Some(account.id.clone());
+        }
+        block_x += block_width + sc(ACCOUNT_BLOCK_GAP);
+    }
+    None
+}
+
+fn account_tooltip_text(state: &AppState, account_id: &str) -> Option<String> {
+    let account = account_render_data(state)
+        .into_iter()
+        .find(|account| account.id == account_id)?;
+    Some(account_tooltip_text_for(&account))
+}
+
+fn account_tooltip_text_for(account: &AccountRenderData) -> String {
+    let name = account
+        .display_name
+        .clone()
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| name.trim().replace(['\r', '\n'], " "))
+        .unwrap_or_else(|| "Account".to_string());
+    let active = if account.active { "  ACTIVE" } else { "" };
+    let role = if account.current_only {
+        "Current-only Codex account"
+    } else if account.active {
+        "Current Codex account · Monitored account"
+    } else {
+        "Monitored account"
+    };
+    let status = match account.connection_state {
+        account::ConnectionState::Connected if account.usage_stale => "Connected (stale)",
+        account::ConnectionState::Connected => "Connected",
+        account::ConnectionState::ReauthRequired => "Re-auth required",
+        account::ConnectionState::Unavailable => "Unavailable",
+    };
+    let usage = account.usage.as_ref().filter(|_| !account.usage_stale);
+    let session = tooltip_usage_line("5h", usage.map(|usage| &usage.session));
+    let weekly = tooltip_usage_line("Weekly", usage.map(|usage| &usage.weekly));
+
+    format!("{name}{active}\n{role}\n\nUsage remaining\n{session}\n{weekly}\n\n{status}")
+}
+
+fn tooltip_usage_line(label: &str, section: Option<&crate::models::UsageSection>) -> String {
+    let Some(section) = section else {
+        return format!("{label:<7} --       Unknown reset");
+    };
+    let remaining = section
+        .used_percentage
+        .map(|used| format!("{:.0}%", poller::remaining_percentage(used)))
+        .unwrap_or_else(|| "--".to_string());
+    let reset =
+        format_precise_reset_time(section.resets_at).unwrap_or_else(|| "Unknown reset".to_string());
+    format!("{label:<7} {remaining:>4}     {reset}")
+}
+
+fn update_tooltip_hover(hwnd: HWND, account_id: Option<String>) {
+    let mut state = lock_state();
+    let Some(state) = state.as_mut() else {
+        return;
+    };
+    if state.tooltip_pending_account_id == account_id
+        && state.tooltip_visible_account_id == account_id
+    {
+        return;
+    }
+
+    unsafe {
+        let _ = KillTimer(hwnd, TIMER_TOOLTIP);
+    }
+    if account_id.is_none() {
+        if let Some(tooltip_hwnd) = state.tooltip_hwnd {
+            unsafe {
+                let _ = ShowWindow(tooltip_hwnd, SW_HIDE);
+            }
+        }
+        state.tooltip_pending_account_id = None;
+        state.tooltip_visible_account_id = None;
+        state.tooltip_text.clear();
+        return;
+    }
+
+    if state.tooltip_visible_account_id != account_id {
+        if let Some(tooltip_hwnd) = state.tooltip_hwnd {
+            unsafe {
+                let _ = ShowWindow(tooltip_hwnd, SW_HIDE);
+            }
+        }
+        state.tooltip_visible_account_id = None;
+    }
+    state.tooltip_pending_account_id = account_id;
+    unsafe {
+        let _ = SetTimer(hwnd, TIMER_TOOLTIP, TOOLTIP_DELAY_MS, None);
+    }
+}
+
+fn show_pending_tooltip(hwnd: HWND) {
+    let (account_id, text, existing_tooltip) = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        let Some(account_id) = state.tooltip_pending_account_id.clone() else {
+            return;
+        };
+        let Some(text) = account_tooltip_text(state, &account_id) else {
+            return;
+        };
+        (account_id, text, state.tooltip_hwnd)
+    };
+
+    unsafe {
+        let _ = KillTimer(hwnd, TIMER_TOOLTIP);
+    }
+    let tooltip_hwnd = existing_tooltip
+        .filter(|tooltip_hwnd| *tooltip_hwnd != HWND::default())
+        .or_else(|| create_tooltip_window(hwnd));
+    let Some(tooltip_hwnd) = tooltip_hwnd else {
+        return;
+    };
+
+    let (main_rect, tooltip_width, tooltip_height) = unsafe {
+        let mut main_rect = RECT::default();
+        if GetWindowRect(hwnd, &mut main_rect).is_err() {
+            return;
+        }
+        (main_rect, sc(286), sc(122))
+    };
+    let x = main_rect.left;
+    let mut y = main_rect.top - tooltip_height - sc(6);
+    if y < 0 {
+        y = main_rect.bottom + sc(6);
+    }
+
+    {
+        let mut state = lock_state();
+        let Some(state) = state.as_mut() else {
+            return;
+        };
+        if state.tooltip_pending_account_id.as_deref() != Some(account_id.as_str()) {
+            return;
+        }
+        state.tooltip_hwnd = Some(tooltip_hwnd);
+        state.tooltip_visible_account_id = Some(account_id);
+        state.tooltip_text = text;
+    }
+
+    unsafe {
+        let _ = SetWindowPos(
+            tooltip_hwnd,
+            HWND_TOPMOST,
+            x,
+            y,
+            tooltip_width,
+            tooltip_height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        let region = CreateRoundRectRgn(
+            0,
+            0,
+            tooltip_width + 1,
+            tooltip_height + 1,
+            sc(8) * 2,
+            sc(8) * 2,
+        );
+        if !region.is_invalid() {
+            let _ = SetWindowRgn(tooltip_hwnd, region, true);
+        }
+        let _ = InvalidateRect(tooltip_hwnd, None, false);
+        let _ = UpdateWindow(tooltip_hwnd);
+    }
+}
+
+fn create_tooltip_window(owner: HWND) -> Option<HWND> {
+    let class_name = native_interop::wide_str("CodexUsageTooltip");
+    unsafe {
+        let hinstance = HINSTANCE(GetModuleHandleW(PCWSTR::null()).ok()?.0);
+        let hwnd = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            PCWSTR::from_raw(class_name.as_ptr()),
+            PCWSTR::null(),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            owner,
+            HMENU::default(),
+            hinstance,
+            None,
+        )
+        .ok()?;
+        Some(hwnd)
+    }
+}
+
+unsafe extern "system" fn tooltip_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            paint_tooltip(hdc, hwnd);
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+fn paint_tooltip(hdc: HDC, hwnd: HWND) {
+    let (is_dark, text) = {
+        let state = lock_state();
+        let Some(state) = state.as_ref() else {
+            return;
+        };
+        (state.is_dark, state.tooltip_text.clone())
+    };
+    let mut text_wide: Vec<u16> = text.encode_utf16().collect();
+    unsafe {
+        let mut rect = RECT::default();
+        let _ = GetClientRect(hwnd, &mut rect);
+        let background = if is_dark {
+            Color::from_hex("#202020")
+        } else {
+            Color::from_hex("#F8F8F8")
+        };
+        let foreground = if is_dark {
+            Color::from_hex("#F2F2F2")
+        } else {
+            Color::from_hex("#1F1F1F")
+        };
+        let border = if is_dark {
+            Color::from_hex("#4A4A4A")
+        } else {
+            Color::from_hex("#C8C8C8")
+        };
+        let brush = CreateSolidBrush(COLORREF(background.to_colorref()));
+        FillRect(hdc, &rect, brush);
+        let _ = DeleteObject(brush);
+        let pen = CreatePen(PS_SOLID, sc(1), COLORREF(border.to_colorref()));
+        let old_pen = SelectObject(hdc, pen);
+        let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        let _ = RoundRect(
+            hdc,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            sc(8),
+            sc(8),
+        );
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        let _ = DeleteObject(pen);
+
+        let font_name = native_interop::wide_str("Segoe UI");
+        let font = CreateFontW(
+            sc(-12),
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET.0 as u32,
+            OUT_TT_PRECIS.0 as u32,
+            CLIP_DEFAULT_PRECIS.0 as u32,
+            CLEARTYPE_QUALITY.0 as u32,
+            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+            PCWSTR::from_raw(font_name.as_ptr()),
+        );
+        let old_font = SelectObject(hdc, font);
+        let _ = SetBkMode(hdc, TRANSPARENT);
+        let _ = SetTextColor(hdc, COLORREF(foreground.to_colorref()));
+        rect.left += sc(10);
+        rect.top += sc(8);
+        rect.right -= sc(10);
+        rect.bottom -= sc(8);
+        let _ = DrawTextW(
+            hdc,
+            &mut text_wide,
+            &mut rect,
+            DT_LEFT | DT_TOP | DT_WORDBREAK,
+        );
         SelectObject(hdc, old_font);
         let _ = DeleteObject(font);
     }
@@ -3326,6 +4193,9 @@ unsafe extern "system" fn wnd_proc(
                 TIMER_UPDATE_CHECK => {
                     begin_update_check(hwnd, false);
                 }
+                TIMER_TOOLTIP => {
+                    show_pending_tooltip(hwnd);
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -3387,6 +4257,7 @@ unsafe extern "system" fn wnd_proc(
                 state.as_ref().map(|s| s.dragging).unwrap_or(false)
             };
             if is_dragging {
+                update_tooltip_hover(hwnd, None);
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);
                 let move_target = {
@@ -3474,7 +4345,28 @@ unsafe extern "system" fn wnd_proc(
                         native_interop::move_window(hwnd_val, x, y, widget_width, widget_height);
                     }
                 }
+            } else {
+                let client_x = (lparam.0 & 0xFFFF) as i16 as i32;
+                let client_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                let account_id = {
+                    let state = lock_state();
+                    state
+                        .as_ref()
+                        .and_then(|state| account_id_at_point(state, client_x, client_y))
+                };
+                update_tooltip_hover(hwnd, account_id);
+                let mut track = TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    ..Default::default()
+                };
+                let _ = TrackMouseEvent(&mut track);
             }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE_MSG => {
+            update_tooltip_hover(hwnd, None);
             LRESULT(0)
         }
         WM_LBUTTONUP => {
@@ -3520,6 +4412,7 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_RBUTTONUP => {
+            update_tooltip_hover(hwnd, None);
             show_context_menu(hwnd);
             LRESULT(0)
         }
@@ -3784,12 +4677,22 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            let hook = {
-                let state = lock_state();
-                state.as_ref().and_then(|s| s.win_event_hook)
+            let (hook, tooltip_hwnd) = {
+                let mut state = lock_state();
+                state
+                    .as_mut()
+                    .map(|s| {
+                        s.tooltip_pending_account_id = None;
+                        s.tooltip_visible_account_id = None;
+                        (s.win_event_hook, s.tooltip_hwnd.take())
+                    })
+                    .unwrap_or((None, None))
             };
             if let Some(h) = hook {
                 native_interop::unhook_win_event(h);
+            }
+            if let Some(tooltip_hwnd) = tooltip_hwnd {
+                let _ = DestroyWindow(tooltip_hwnd);
             }
             tray_icon::remove_all(hwnd);
             PostQuitMessage(0);
@@ -4984,6 +5887,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
         show_session_window,
         show_weekly_window,
         widget_style,
+        account_views,
         account_initial,
     ) = {
         let state = lock_state();
@@ -5010,6 +5914,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_session_window,
                 s.show_weekly_window,
                 s.widget_style,
+                account_render_data(s),
                 s.account_registry.display_initial(
                     s.current_working_identity
                         .as_ref()
@@ -5080,6 +5985,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
             show_session_window,
             show_weekly_window,
             widget_style,
+            &account_views,
             account_initial,
             &codex_accent,
             &antigravity_accent,
@@ -5336,10 +6242,15 @@ fn draw_circle_provider(
     );
 }
 
-fn draw_account_initial(hdc: HDC, x: i32, y: i32, initial: char, is_dark: bool) {
+fn draw_account_initial(hdc: HDC, x: i32, y: i32, initial: char, is_dark: bool, active: bool) {
     let diameter = sc(ACCOUNT_INITIAL_DIAMETER);
-    let outline = usage_separator_text_color(is_dark);
-    let pen = unsafe { CreatePen(PS_SOLID, sc(1), COLORREF(outline.to_colorref())) };
+    let outline = if active {
+        Color::from_hex("#4EA1FF")
+    } else {
+        usage_separator_text_color(is_dark)
+    };
+    let pen_width = if active { sc(2) } else { sc(1) };
+    let pen = unsafe { CreatePen(PS_SOLID, pen_width, COLORREF(outline.to_colorref())) };
 
     unsafe {
         let old_pen = SelectObject(hdc, pen);
@@ -5675,6 +6586,146 @@ mod tests {
         assert!(circle_sweep_degrees(76.0) > circle_sweep_degrees(44.0));
         assert_eq!(circle_sweep_degrees(0.0), 0.0);
         assert_eq!(circle_sweep_degrees(100.0), 360.0);
+    }
+
+    fn render_account(
+        id: &str,
+        initial: Option<char>,
+        active: bool,
+        current_only: bool,
+    ) -> AccountRenderData {
+        AccountRenderData {
+            id: id.to_string(),
+            initial,
+            display_name: Some(id.to_string()),
+            usage: None,
+            usage_stale: false,
+            connection_state: account::ConnectionState::Connected,
+            active,
+            current_only,
+        }
+    }
+
+    #[test]
+    fn collection_width_grows_horizontally_without_changing_taskbar_height() {
+        let widths = (1..=4)
+            .map(|count| {
+                total_account_collection_width(count, LanguageId::English, WidgetStyle::Bar, 0)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(widths.windows(2).all(|pair| pair[1] > pair[0]));
+        assert_eq!(WIDGET_HEIGHT, 46);
+    }
+
+    #[test]
+    fn collection_render_data_keeps_retained_accounts_and_adds_current_only_overflow() {
+        let mut registry = account::AccountRegistry::empty();
+        for (id, name) in [
+            ("account-a", "Alice"),
+            ("account-b", "Bob"),
+            ("account-c", "Carol"),
+            ("account-d", "Drew"),
+        ] {
+            let identity = account::AccountIdentity {
+                id: id.to_string(),
+                display_name: Some(name.to_string()),
+                username: None,
+                email: None,
+            };
+            registry
+                .try_add(account::MonitoredAccount::from_identity(&identity, None))
+                .unwrap();
+        }
+        let current = account::AccountIdentity {
+            id: "account-e".to_string(),
+            display_name: Some("Eve".to_string()),
+            username: None,
+            email: None,
+        };
+        let mut usage = crate::models::UsageData::default();
+        usage.session.used_percentage = Some(27.0);
+
+        let rendered = account_render_data_for(&registry, Some(&current), Some(&usage), true);
+
+        assert_eq!(rendered.len(), 5);
+        assert_eq!(rendered[4].id, "account-e");
+        assert!(rendered[4].active);
+        assert!(rendered[4].current_only);
+        assert_eq!(
+            rendered[4].usage.as_ref().unwrap().session.used_percentage,
+            Some(27.0)
+        );
+        assert!(rendered[..4].iter().all(|account| !account.current_only));
+    }
+
+    #[test]
+    fn hover_hit_test_covers_the_entire_account_block() {
+        let accounts = vec![
+            render_account("Alice", Some('A'), true, false),
+            render_account("Bob", Some('B'), false, false),
+        ];
+        let start = sc(LEFT_DIVIDER_W) + sc(DIVIDER_RIGHT_MARGIN);
+        let block_width = account_block_width(LanguageId::English, WidgetStyle::Circle);
+
+        assert_eq!(
+            account_id_at_point_for(
+                &accounts,
+                start + 1,
+                0,
+                LanguageId::English,
+                WidgetStyle::Circle,
+            )
+            .as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(
+            account_id_at_point_for(
+                &accounts,
+                start + block_width + sc(ACCOUNT_BLOCK_GAP) + 1,
+                sc(WIDGET_HEIGHT - 1),
+                LanguageId::English,
+                WidgetStyle::Circle,
+            )
+            .as_deref(),
+            Some("Bob")
+        );
+        assert_eq!(
+            account_id_at_point_for(
+                &accounts,
+                start + block_width + 1,
+                sc(WIDGET_HEIGHT / 2),
+                LanguageId::English,
+                WidgetStyle::Circle,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn account_tooltip_uses_role_usage_and_status_without_identity_secrets() {
+        let mut usage = crate::models::UsageData::default();
+        usage.session.used_percentage = Some(81.0);
+        usage.weekly.used_percentage = Some(55.0);
+        let account = AccountRenderData {
+            id: "opaque-account-id".to_string(),
+            initial: Some('A'),
+            display_name: Some("Alice".to_string()),
+            usage: Some(usage),
+            usage_stale: false,
+            connection_state: account::ConnectionState::Connected,
+            active: true,
+            current_only: false,
+        };
+
+        let tooltip = account_tooltip_text_for(&account);
+
+        assert!(tooltip.contains("Alice  ACTIVE"));
+        assert!(tooltip.contains("Current Codex account · Monitored account"));
+        assert!(tooltip.contains("19%"));
+        assert!(tooltip.contains("45%"));
+        assert!(tooltip.contains("Connected"));
+        assert!(!tooltip.contains("opaque-account-id"));
     }
 
     #[test]
