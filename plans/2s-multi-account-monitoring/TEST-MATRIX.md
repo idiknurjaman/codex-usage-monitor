@@ -67,9 +67,9 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | MIG-01 | Settings | Existing settings without registry | App starts with valid working-account behavior | pending |
 | MIG-02 | Two-slot metadata | Existing Phase-01/02 `slot-1/slot-2` settings | Migrates/reconstructs safely into generalized owner-handle model | pending |
 | BUILD-01 | Formatting | `cargo fmt --check` | PASS | Class S — PASS at `acb870d204d83bcba71534aeab5910784e74b1c1` |
-| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 81/81 tests at `673d97b7f4e485224e5baee540caee885d8163c3` |
+| BUILD-02 | Tests | `cargo test` | PASS | Class S — PASS: 85/85 tests at `82d3b54e7f9b3c60cf6e74d4eb927c68ab32927a` |
 | BUILD-03 | Lint | `cargo clippy --all-targets` | No new plan-caused warnings/errors | Class S — PASS exit; existing warnings only |
-| BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: alternate optimized release build completed; default output was locked |
+| BUILD-04 | Release build | `cargo build --release` | PASS | Class S — PASS: default optimized release build completed |
 | BUILD-05 | Diff hygiene | `git diff --check` | PASS | Class S — PASS |
 | SEC-01 | Working state | Compare normal Codex state before/after lifecycle | Auth/session/history/config source of truth not mutated by monitor management | pending |
 | SEC-02 | Token ownership | Review monitor owners | No refresh token duplicated across independently refreshing owners | pending |
