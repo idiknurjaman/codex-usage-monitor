@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `e6722e46e27be2e5ca114c71b169e4315dd824dd`.
+Implementation checkpoint: `6c55c0aab44d03ce05210ab9e379854be2104f31`.
 Phase 04 source and deterministic visual/state evidence are complete. Sidik's
 owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
 remains ready for Sol final-gate reconciliation.
@@ -626,10 +626,14 @@ remains ready for Sol final-gate reconciliation.
   fill without drawing a visible border/stroke.
 - Native context menus remain classic `HMENU`/`TrackPopupMenu`. Before menu
   construction, the app dynamically resolves UxTheme ordinals 135
-  (`SetPreferredAppMode`) and 136 (`FlushMenuThemes`), selects `AllowDark` so
-  the popup follows the Windows theme, and flushes menu themes. If the DLL or
+  (`SetPreferredAppMode`) and 136 (`FlushMenuThemes`), selects `ForceDark` or
+  `ForceLight` so the popup follows the Windows theme, and flushes menu themes. If the DLL or
   either export is unavailable, the resolver returns `Unsupported` and leaves
   standard native menu behavior unchanged; no owner-draw menu path was added.
+- On Windows 11, the tooltip applies documented DWM `DWMWA_BORDER_COLOR` with
+  `DWMWA_COLOR_NONE` after creation. This suppresses the system frame while
+  retaining the rounded region; older Windows versions safely fall back when
+  the attribute is unsupported.
 
 #### Class F — deterministic visual/state proof
 
@@ -652,6 +656,7 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | Existing menu/routing tests | Direct per-account submenu, dynamic stable-identity routing, max-four Add disablement, and no fixed-slot command path remain green. |
 | `theme::tests::native_popup_theme_uses_feature_detected_uxtheme_exports` | Pins the reviewed ordinal/mode contract used for the dynamic native popup-menu opt-in. |
 | `theme::tests::native_popup_theme_missing_export_uses_native_fallback` | Deterministically proves any missing UxTheme export selects explicit `Unsupported` fallback while the complete export pair selects `Applied`. |
+| `theme::tests::native_popup_theme_follows_the_system_palette` | Proves dark Windows selects UxTheme `ForceDark` and light Windows selects `ForceLight`. |
 
 #### Visual artifacts
 
@@ -694,16 +699,18 @@ behavior.
 
 #### Theme runtime smoke
 
-The alternate release binary from this source correction reached the native
-context-menu path on the current Windows dark-theme environment and emitted the safe diagnostic
-`native popup menu theme result=Applied system_dark=true`. This proves the
-feature-detected runtime path was reached without owner-draw code or a second
-menu implementation. It is a runtime smoke result, not a visual owner
-acceptance claim: a separate existing 2S instance held the single-instance
-mutex when the rebuilt post-test binary was launched, and the shell capture
-helper could not capture desktop pixels. The light-theme path is covered by the
-system-following `AllowDark` contract and the explicit missing-export fallback
-tests; light/dark visual owner confirmation remains open for Sol/Sidik.
+The earlier alternate release binary reached the native context-menu path on
+the current Windows dark-theme environment and emitted the safe diagnostic
+`native popup menu theme result=Applied system_dark=true`; the corrected
+ForceDark/ForceLight implementation is included in the new release below. The
+earlier smoke proves the feature-detected runtime path was reachable without
+owner-draw code or a second menu implementation. It is a runtime smoke result,
+not a visual owner acceptance claim: the existing 2S instance held the
+single-instance mutex when the rebuilt corrected binary was launched, and the
+shell capture helper could not capture desktop pixels. The light-theme path is
+covered by the system-following mode contract and explicit missing-export
+fallback tests; light/dark visual owner confirmation remains open for
+Sol/Sidik.
 
 No new runtime claim is made for Explorer/taskbar restart, four-account real
 cardinality, same-initial real accounts, or a deliberately exercised
@@ -713,14 +720,14 @@ not be treated as Phase 05 closure.
 #### Verification
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 89 passed, 0 failed.
+- `cargo test --locked`: PASS — 90 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing repository
   warnings remain, with no new compile error.
 - `CARGO_TARGET_DIR=<temp> cargo build --release --locked`: PASS — alternate
   optimized release build at
   `%TEMP%\codex-usage-phase04-theme-target\release\codex-usage.exe` after the
   tooltip/theme correction. SHA-256:
-  `6D749161AF46A9E65AA6F71793C25A7A665A52654D2EA30578DC278E1D9E7EEE`.
+  `18F3DC96DC7FA1A7E9CD3BB879EFDBAA79D37635C6245F0515BE6CCB2B6427B5`.
 - `git diff --check`: PASS before checkpoint.
 
 #### Scope guard and disposition
@@ -731,7 +738,9 @@ Phase 05 remains blocked.
 
 **Decision:** `READY FOR SOL FINAL GATE` — Class R owner-runtime PASS bounded
 plus Class F/S UI implementation and deterministic evidence are complete
-at `10afd36e9495b0c59571e70bf593af9a19d5a7ec`. Phase 05 remains blocked.
+at `6c55c0aab44d03ce05210ab9e379854be2104f31`. The new tooltip-frame and
+native-menu theme behavior still has a focused owner visual check open; Phase
+05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 
