@@ -3,12 +3,13 @@
 ## Current state
 
 - **Plan:** `2s-multi-account-monitoring`
-- **Lifecycle:** `in-progress`
+- **Lifecycle:** `complete`
 - **Current phase:** `05-resilience-acceptance`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
 - **Deterministic proof/test checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
+- **Sol Final Audit:** `PASS`
 
 ## Baseline evidence
 
@@ -21,7 +22,7 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling passed its Sol final gate; Phase 04 final collection taskbar UI passed its Sol final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. Phase 05 is now active.
+Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling passed its Sol final gate; Phase 04 final collection taskbar UI passed its Sol final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. Phase 05 has completed and the 2S plan has passed Sol's final audit.
 
 ## Open findings / blockers
 
@@ -753,11 +754,11 @@ still have a focused owner visual check open; Phase 05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 
-**Status:** `ready-for-sol-final-audit`
+**Status:** `complete/PASS`
 
-Phase 05 is authorized after the Phase 04 PASS. The full matrix has been
-reconciled against valid Phase 00–04 evidence and the two resilience rows now
-have bounded Class R runtime proof. Sol final audit is pending.
+Phase 05 was authorized after the Phase 04 PASS. The full matrix was
+reconciled against valid Phase 00–04 evidence and the two resilience rows have
+bounded Class R runtime proof. Sol's final audit is recorded below as `PASS`.
 
 #### Phase 05 pre-runtime matrix reconciliation
 
@@ -796,7 +797,16 @@ The source remained unchanged at implementation checkpoint
 
 ## Final audit
 
-**Sol verdict:** `Phase 04 PASS; Phase 05 ready for Sol final audit`
+**Sol verdict:** `Phase 05 PASS; Sol final audit PASS`
 
-Do not close the plan until Phase 05 has current TEST-MATRIX evidence and Sol's
-final audit.
+The 2S plan lifecycle is `complete`. Merge, archive, branch deletion, and plan
+deletion were not performed.
+
+#### Sol Final Audit
+
+- **Verdict:** `PASS`
+- **Implementation checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
+- **Final evidence/audit HEAD:** `9dca1fadc3c19ad07c0a3f5e89b17bacfee9b6e2`
+- **Phase 05:** `complete/PASS`
+- **Open blockers:** none
+- **High-severity findings:** none

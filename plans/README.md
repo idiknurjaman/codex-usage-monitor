@@ -4,7 +4,11 @@ This directory contains active implementation plans for this fork.
 
 ## Active
 
-- [`2s-multi-account-monitoring`](./2s-multi-account-monitoring/README.md) — collection-driven Codex account monitoring with automatic current-account discovery, manual monitor-account add, runtime active-account attribution, and a product policy of up to four retained accounts without account switching.
+No active plans.
+
+## Completed
+
+- [`2s-multi-account-monitoring`](./2s-multi-account-monitoring/README.md) — complete; collection-driven Codex account monitoring with automatic current-account discovery, manual monitor-account add, runtime active-account attribution, and a product policy of up to four retained accounts without account switching.
 
 `2S` remains the project codename. It is not a two-slot capacity contract.
 

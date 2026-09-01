@@ -1,6 +1,6 @@
 # 2S Multi-Account Monitoring
 
-**Status:** `in-progress`
+**Status:** `complete`
 **Current phase:** `05-resilience-acceptance`
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
@@ -171,7 +171,7 @@ This means the max-four requirement remains mandatory, but Sidik is not required
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 has passed its Sol final gate; Phase 05 is now active.
+Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 and Phase 05 have passed their Sol gates; the 2S plan is complete after Sol's final audit.
 
 ## Historical evidence disposition
 
@@ -232,12 +232,13 @@ cargo build --release
 git diff --check
 ```
 
-## Current Phase 05 status and next authorized action
+## Final closure status
 
 Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; its deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, and Sol has issued a PASS gate.
 
 Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 taskbar collection rendering and bounded owner-runtime evidence passed Sol's final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. The accepted Phase 00–04 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
 
-Phase 05 is the only active phase and its runtime/evidence work is complete;
-the plan is now `READY FOR SOL FINAL AUDIT`. Do not merge, archive, or close
-the plan before Sol completes the final audit.
+Phase 05 runtime/evidence work is complete and Sol's final audit is `PASS`.
+The 2S plan lifecycle is `complete` and is eligible for merge/release
+consideration. Merge, archive, branch deletion, and plan deletion remain
+separately unauthorized.
