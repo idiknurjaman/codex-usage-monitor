@@ -7,8 +7,8 @@
 - **Current phase:** `04-taskbar-ui`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
-- **Implementation checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
-- **Deterministic proof/test checkpoint:** `acb870d204d83bcba71534aeab5910784e74b1c1`
+- **Implementation checkpoint:** `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`
+- **Deterministic proof/test checkpoint:** `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`
 
 ## Baseline evidence
 
@@ -582,9 +582,95 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 ### Phase 04 — Taskbar UI
 
-**Status:** `in-progress — authorized`
+**Status:** `ready-for-sol-final-gate`
 
-Implementation and runtime evidence pending at the Phase 04 checkpoint.
+Implementation checkpoint: `8adcd0612538d9e5125dcf52ea93d7171fbda5a7`.
+Phase 04 source and deterministic visual/state evidence are complete; owner
+runtime acceptance remains for Sol's final gate.
+
+#### Class S — source/UI state proof
+
+- Renderer input is a runtime snapshot derived from `AccountRegistry` plus the
+  current working identity. It renders retained accounts in collection order
+  and appends an unknown current identity as current-only without persisting or
+  evicting retained accounts.
+- Bar and Circle both render one two-row Codex block per account. Width is
+  calculated from collection length and grows horizontally; taskbar height
+  remains `WIDGET_HEIGHT = 46` at the tested 100% DPI baseline.
+- Active state is derived by stable identity matching. The active identity chip
+  uses a blue outline/ring; inactive chips use the neutral outline. No active
+  role is persisted and no account switching control was added.
+- Unavailable or stale account usage renders as ``; missing windows remain
+  unavailable and are never converted to synthetic `0%`.
+- The hover hit-test covers the full account block across the complete widget
+  height. A delayed, non-activating native Win32 tooltip reports display name,
+  ``ACTIVE`` and current/monitored role, both remaining values, exact reset
+  values, and connection status without email or opaque account ID.
+- Existing direct collection-driven account menus and `Widget Style > Bar |
+  Circle` persistence remain in place; this phase does not change their
+  auth/polling behavior.
+
+#### Class F — deterministic visual/state proof
+
+The UI fixtures use only fake identity/state values and do not create OAuth,
+access tokens, refresh tokens, keyring credentials, or production auth files.
+
+| Focused test/artifact | Proof |
+|---|---|
+| `window::tests::collection_render_data_keeps_retained_accounts_and_adds_current_only_overflow` | Four retained identities remain in order while current-only E is appended with active state and current usage, without owner mutation. |
+| `window::tests::collection_width_grows_horizontally_without_changing_taskbar_height` | Collection width grows for 1–4 accounts while the taskbar widget height remains 46 px. |
+| `window::tests::hover_hit_test_covers_the_entire_account_block` | Initial, quota rows, bars/circles, reset areas, and the full vertical block resolve to the same account hit region. |
+| `window::tests::account_tooltip_uses_role_usage_and_status_without_identity_secrets` | Tooltip hierarchy includes role, active marker, remaining 5h/weekly values, and status without stable ID. |
+| Existing `window::tests::widget_style_serializes_and_defaults_to_bar` | Bar remains the default and Circle remains persisted through settings serialization. |
+| Existing menu/routing tests | Direct per-account submenu, dynamic stable-identity routing, max-four Add disablement, and no fixed-slot command path remain green. |
+
+#### Visual artifacts
+
+The following release-binary captures are fixture-only layout evidence. The
+environment used the non-embedded fallback popup because no taskbar handle was
+available; all captures retain the 46 px widget height.
+
+| Artifact | Size | Class |
+|---|---:|---|
+| [phase04-bar-single.png](evidence/phase04-bar-single.png) | 165 × 46 | Class F/S |
+| [phase04-circle-single.png](evidence/phase04-circle-single.png) | 120 × 46 | Class F/S |
+| [phase04-bar-four-account-fixture.png](evidence/phase04-bar-four-account-fixture.png) | 827 × 46 | Class F |
+
+The visual smoke environment could not reach the usage endpoint, so these
+captures intentionally show unavailable values rather than fabricated quota
+numbers. They are not real-account usage proof.
+
+#### Class R — owner runtime boundary
+
+No new owner-observed Phase 04 walkthrough has been run yet. Class R runtime
+proof is required for the final gate to confirm the real taskbar embedding,
+active blue ring, whole-account tooltip, two-account attribution, unavailable
+isolation, direct menus, and DPI behavior on Sidik's Windows taskbar. The
+accepted Phase 00–03 credential, identity, lifecycle, and polling evidence
+remains unchanged and is not reclassified by this UI checkpoint.
+
+#### Verification
+
+- `cargo fmt --check`: PASS.
+- `cargo test --locked`: PASS — 80 passed, 0 failed.
+- `cargo clippy --all-targets --locked`: PASS exit; existing repository
+  warnings remain, with no new compile error.
+- `cargo build --release`: PASS — default optimized release build.
+- Alternate release build: PASS at the disposable
+  `target-phase04-release` target; the resulting binary was used for the
+  visual captures and the disposable target was removed afterward.
+- `git diff --check`: PASS before checkpoint.
+
+#### Scope guard and disposition
+
+No changes were made to `poller.rs`, auth ownership, login lifecycle, quota
+semantics, reset calculations, account switching, or multi-account polling.
+Phase 05 remains blocked.
+
+**Decision:** `READY FOR SOL FINAL GATE` — Class S/F UI implementation and
+deterministic evidence are complete at
+`8adcd0612538d9e5125dcf52ea93d7171fbda5a7`. Class R owner runtime acceptance
+is not claimed yet.
 
 ### Phase 05 — Resilience & Acceptance
 
@@ -594,6 +680,6 @@ Evidence pending.
 
 ## Final audit
 
-**Sol verdict:** `Phase 03 PASS; Phase 04 in progress`
+**Sol verdict:** `Phase 03 PASS; Phase 04 ready for Sol final gate`
 
 Do not change this to PASS until the final implementation checkpoint has current TEST-MATRIX evidence and Sidik runtime acceptance.

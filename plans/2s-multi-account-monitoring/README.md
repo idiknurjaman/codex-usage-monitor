@@ -171,7 +171,7 @@ This means the max-four requirement remains mandatory, but Sidik is not required
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 is active; Phase 05 remains blocked until Phase 04 passes.
+Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 implementation is ready for its Sol final gate; Phase 05 remains blocked until Phase 04 passes.
 
 ## Historical evidence disposition
 
@@ -236,6 +236,6 @@ git diff --check
 
 Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; its deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, and Sol has issued a PASS gate.
 
-Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 is authorized for taskbar collection rendering only. The accepted Phase 00–03 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
+Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 taskbar collection rendering is implemented and awaiting Sol final-gate review. The accepted Phase 00–03 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
 
-Luna may execute **Phase 04 taskbar UI only** and stop at its Sol final-gate review. Do not begin Phase 05 until Sol issues Phase 04 PASS.
+Phase 04 is the only active phase and is now `READY FOR SOL FINAL GATE`. Do not begin Phase 05 until Sol issues Phase 04 PASS.

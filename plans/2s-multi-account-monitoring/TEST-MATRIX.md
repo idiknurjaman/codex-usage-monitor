@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring — Test Matrix
 
 **Plan:** `2s-multi-account-monitoring`
-**Status:** `Phase 03 PASS; Phase 04 in progress`
+**Status:** `Phase 03 PASS; Phase 04 ready for Sol final gate`
 **Product policy:** maximum four retained accounts; collection-driven/N-capable implementation
 
 Evidence must be current to the exact implementation checkpoint under review. Historical PASS results prove only their historical checkpoints and do not prove the amended account model.
@@ -44,21 +44,21 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | LIFE-08 | Restart | Restart after mixed auto/manual discovery | Retained identities restore; active role recomputed from current Codex | pending |
 | LIFE-09 | Max four | Retain A/B/C/D through valid paths | Four retained identities supported without structural slot hard-coding | pending |
 | LIFE-10 | Current overflow | With A/B/C/D retained, Codex changes to E | E current-only; A/B/C/D retained; user can free capacity explicitly | pending |
-| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | pending |
-| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | pending |
-| UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | pending |
-| UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | pending |
-| UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | pending |
-| UI-06 | Tooltip privacy | Inspect tooltip | No email, opaque ID, token, OAuth material by default | pending |
-| UI-07 | Two accounts | Bar/Circle | Both account groups readable; attribution correct | pending |
-| UI-08 | Four accounts | Representative Bar/Circle runtime state | Four retained accounts readable; no action/identity collision | pending |
-| UI-09 | Context menu | Accounts menu with multiple identities | Direct per-account submenu; no nested `Manage accounts >` | pending |
-| UI-10 | Menu action | Account submenu | `Re-authenticate` + `Remove from monitor` route to selected identity | pending |
-| UI-11 | Add disabled | Four retained accounts | `Add monitor account...` visibly disabled | pending |
-| UI-12 | Same initial | Distinct accounts derive same initial | Both render/manage independently by stable identity | pending |
-| UI-13 | Failure state | One account unavailable | Healthy accounts remain readable; failed account explicit | pending |
-| UI-14 | Overflow state | Four retained + current-only E | Current identity remains understandable; no retained account silently dropped | pending |
-| UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | pending |
+| UI-01 | Single account | Bar style | Existing accepted single-account visual remains readable | Class F/S — PASS; owner taskbar runtime pending |
+| UI-02 | Single account | Circle style | Initial + two quota rows remain readable | Class F/S — PASS; owner taskbar runtime pending |
+| UI-03 | Active marker | Current account in widget | Subtle blue outline/ring on identity chip; inactive chips neutral | Class F/S — PASS; owner taskbar runtime pending |
+| UI-04 | Tooltip target | Hover initial, 5h, weekly, bar, %, reset areas | Same account tooltip opens from entire account block | Class S — PASS; owner tooltip runtime pending |
+| UI-05 | Tooltip content | Current and monitored account tooltips | Name, ACTIVE badge when current, role, 5h/weekly remaining, exact reset, connection status | Class S — PASS; owner tooltip runtime pending |
+| UI-06 | Tooltip privacy | Inspect tooltip | No email, opaque ID, token, OAuth material by default | Class S — PASS; owner tooltip runtime pending |
+| UI-07 | Two accounts | Bar/Circle | Both account groups readable; attribution correct | Class F/S — PASS for collection layout; owner two-account runtime pending |
+| UI-08 | Four accounts | Representative Bar/Circle runtime state | Four retained accounts readable; no action/identity collision | Class F — PASS for fixture layout; owner runtime pending |
+| UI-09 | Context menu | Accounts menu with multiple identities | Direct per-account submenu; no nested `Manage accounts >` | Class S — PASS; existing menu runtime pending |
+| UI-10 | Menu action | Account submenu | `Re-authenticate` + `Remove from monitor` route to selected identity | Class S — PASS; owner menu runtime pending |
+| UI-11 | Add disabled | Four retained accounts | `Add monitor account...` visibly disabled | Class F/S — PASS from existing preflight proof; owner visual runtime pending |
+| UI-12 | Same initial | Distinct accounts derive same initial | Both render/manage independently by stable identity | Class F/S — PASS; owner runtime pending |
+| UI-13 | Failure state | One account unavailable | Healthy accounts remain readable; failed account explicit | Class F/S — PASS; owner runtime pending |
+| UI-14 | Overflow state | Four retained + current-only E | Current identity remains understandable; no retained account silently dropped | Class F/S — PASS; owner overflow runtime pending |
+| UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class S — PASS for DPI-scaled geometry; owner multi-DPI runtime pending |
 | UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
 | UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | pending |

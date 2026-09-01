@@ -1,6 +1,6 @@
 # Phase 04 — Taskbar UI
 
-**Status:** `in-progress — authorized`
+**Status:** `ready-for-sol-final-gate`
 **Goal:** render the account collection cleanly in the existing native taskbar widget, distinguish the runtime current Codex account without clutter, and provide compact account detail through whole-block hover.
 
 ## Preconditions
@@ -108,20 +108,20 @@ Circle direction remains compact and monotonic with remaining quota.
 
 ## Tasks
 
-- [ ] Refactor renderer input to collection-driven account sections.
-- [ ] Render one account without regression.
-- [ ] Render two accounts in Bar and Circle.
-- [ ] Render three/four retained accounts without account-position hard-coding.
-- [ ] Add runtime active blue identity outline.
-- [ ] Add whole-account compact tooltip with name/role/usage/reset/status.
-- [ ] Implement direct account context-menu hierarchy and remove nested Manage accounts layer.
-- [ ] Disable Add monitor account at retained capacity.
-- [ ] Handle same-initial accounts.
-- [ ] Handle unavailable/re-auth states independently.
-- [ ] Handle current-only active overflow state at retained capacity without silent eviction.
-- [ ] Recalculate taskbar width/DPI behavior at 100%, 125%, 150%, and 200%.
-- [ ] Preserve drag/taskbar embedding and multi-monitor behavior.
-- [ ] Capture required screenshots/runtime artifacts.
+- [x] Refactor renderer input to collection-driven account sections.
+- [x] Render one account without regression.
+- [x] Render two accounts in Bar and Circle.
+- [x] Render three/four retained accounts without account-position hard-coding.
+- [x] Add runtime active blue identity outline.
+- [x] Add whole-account compact tooltip with name/role/usage/reset/status.
+- [x] Implement direct account context-menu hierarchy and remove nested Manage accounts layer.
+- [x] Disable Add monitor account at retained capacity.
+- [x] Handle same-initial accounts.
+- [x] Handle unavailable/re-auth states independently.
+- [x] Handle current-only active overflow state at retained capacity without silent eviction.
+- [x] Recalculate taskbar width/DPI behavior at 100%, 125%, 150%, and 200%.
+- [x] Preserve drag/taskbar embedding and multi-monitor behavior.
+- [x] Capture required screenshots/runtime artifacts.
 
 ## Acceptance criteria
 
@@ -156,4 +156,5 @@ Add current screenshot/runtime evidence for:
 - one healthy + one unavailable/re-auth state;
 - DPI/layout verification.
 
-Sidik runtime acceptance is required before Phase 04 passes.
+Sidik runtime acceptance is required before Phase 04 passes; this checkpoint is
+ready for Sol final-gate review and does not claim owner runtime yet.
