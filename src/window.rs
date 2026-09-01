@@ -77,7 +77,7 @@ struct AppState {
     tooltip_hwnd: Option<HWND>,
     tooltip_pending_account_id: Option<String>,
     tooltip_visible_account_id: Option<String>,
-    tooltip_text: String,
+    tooltip_content: Option<TooltipContent>,
 
     session_percent: Option<f64>,
     session_text: String,
@@ -158,8 +158,22 @@ struct AccountRenderData {
     usage: Option<crate::models::UsageData>,
     usage_stale: bool,
     connection_state: account::ConnectionState,
+    last_error: Option<String>,
+    monitor_owned: bool,
     active: bool,
     current_only: bool,
+}
+
+#[derive(Clone, Default)]
+struct TooltipContent {
+    title: String,
+    role: String,
+    session_percent: String,
+    session_reset: String,
+    weekly_percent: String,
+    weekly_reset: String,
+    status: String,
+    note: Option<String>,
 }
 
 const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
@@ -205,6 +219,11 @@ const IDM_ACCOUNT_CANCEL: u16 = 101;
 const IDM_ACCOUNT_ACTION_BASE: u16 = 110;
 const TIMER_TOOLTIP: usize = 6;
 const TOOLTIP_DELAY_MS: u32 = 450;
+const TOOLTIP_WIDTH: i32 = 286;
+const TOOLTIP_HEIGHT: i32 = 142;
+const TOOLTIP_LABEL_X: i32 = 10;
+const TOOLTIP_PERCENT_X: i32 = 72;
+const TOOLTIP_RESET_X: i32 = 112;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_MOUSELEAVE_MSG: u32 = 0x02A3;
@@ -1644,6 +1663,8 @@ fn account_render_data_for(
             usage: account.usage.clone(),
             usage_stale: account.usage_stale,
             connection_state: account.connection_state,
+            last_error: account.last_error.clone(),
+            monitor_owned: account.auth_handle.is_some(),
             active: Some(account.id.as_str()) == current_id,
             current_only: false,
         })
@@ -1665,6 +1686,8 @@ fn account_render_data_for(
                 } else {
                     account::ConnectionState::Unavailable
                 },
+                last_error: None,
+                monitor_owned: false,
                 active: true,
                 current_only: true,
             });
@@ -2095,7 +2118,7 @@ pub fn run() {
                 tooltip_hwnd: None,
                 tooltip_pending_account_id: None,
                 tooltip_visible_account_id: None,
-                tooltip_text: String::new(),
+                tooltip_content: None,
                 session_percent: None,
                 session_text: "--".to_string(),
                 weekly_percent: None,
@@ -3091,14 +3114,14 @@ fn account_id_at_point_for(
     None
 }
 
-fn account_tooltip_text(state: &AppState, account_id: &str) -> Option<String> {
+fn account_tooltip_content(state: &AppState, account_id: &str) -> Option<TooltipContent> {
     let account = account_render_data(state)
         .into_iter()
         .find(|account| account.id == account_id)?;
-    Some(account_tooltip_text_for(&account))
+    Some(account_tooltip_content_for(&account))
 }
 
-fn account_tooltip_text_for(account: &AccountRenderData) -> String {
+fn account_tooltip_content_for(account: &AccountRenderData) -> TooltipContent {
     let name = account
         .display_name
         .clone()
@@ -3108,35 +3131,135 @@ fn account_tooltip_text_for(account: &AccountRenderData) -> String {
     let active = if account.active { "  ACTIVE" } else { "" };
     let role = if account.current_only {
         "Current-only Codex account"
-    } else if account.active {
+    } else if account.active && account.monitor_owned {
         "Current Codex account · Monitored account"
+    } else if account.active {
+        "Current Codex account"
     } else {
         "Monitored account"
     };
-    let status = match account.connection_state {
-        account::ConnectionState::Connected if account.usage_stale => "Connected (stale)",
-        account::ConnectionState::Connected => "Connected",
-        account::ConnectionState::ReauthRequired => "Re-auth required",
-        account::ConnectionState::Unavailable => "Unavailable",
-    };
+    let (status, note) = tooltip_connection_status(account);
     let usage = account.usage.as_ref().filter(|_| !account.usage_stale);
-    let session = tooltip_usage_line("5h", usage.map(|usage| &usage.session));
-    let weekly = tooltip_usage_line("Weekly", usage.map(|usage| &usage.weekly));
+    let (session_percent, session_reset) = tooltip_usage_columns(usage.map(|usage| &usage.session));
+    let (weekly_percent, weekly_reset) = tooltip_usage_columns(usage.map(|usage| &usage.weekly));
 
-    format!("{name}{active}\n{role}\n\nUsage remaining\n{session}\n{weekly}\n\n{status}")
+    TooltipContent {
+        title: format!("{name}{active}"),
+        role: role.to_string(),
+        session_percent,
+        session_reset,
+        weekly_percent,
+        weekly_reset,
+        status,
+        note,
+    }
 }
 
-fn tooltip_usage_line(label: &str, section: Option<&crate::models::UsageSection>) -> String {
+fn tooltip_connection_status(account: &AccountRenderData) -> (String, Option<String>) {
+    if account.active && !account.monitor_owned {
+        return match account.last_error.as_deref() {
+            Some("auth_required" | "no_credentials" | "token_expired") => {
+                ("Re-authentication required".to_string(), None)
+            }
+            Some(_) => ("Unavailable".to_string(), None),
+            None => (
+                "Connected via Codex".to_string(),
+                Some("Re-authenticate to keep monitoring when inactive".to_string()),
+            ),
+        };
+    }
+
+    let status = match account.connection_state {
+        account::ConnectionState::Connected => "Connected",
+        account::ConnectionState::ReauthRequired => "Re-authentication required",
+        account::ConnectionState::Unavailable => "Unavailable",
+    };
+    (status.to_string(), None)
+}
+
+fn tooltip_usage_columns(section: Option<&crate::models::UsageSection>) -> (String, String) {
     let Some(section) = section else {
-        return format!("{label:<7} --       Unknown reset");
+        return ("--".to_string(), "Unknown reset".to_string());
     };
     let remaining = section
         .used_percentage
         .map(|used| format!("{:.0}%", poller::remaining_percentage(used)))
         .unwrap_or_else(|| "--".to_string());
-    let reset =
-        format_precise_reset_time(section.resets_at).unwrap_or_else(|| "Unknown reset".to_string());
-    format!("{label:<7} {remaining:>4}     {reset}")
+    let reset = format_humanized_reset_time(section.resets_at);
+    (remaining, reset)
+}
+
+fn format_humanized_reset_time(resets_at: Option<SystemTime>) -> String {
+    let Some(resets_at) = resets_at else {
+        return "Unknown reset".to_string();
+    };
+    let now = SystemTime::now();
+    let Some(local) = native_interop::system_time_to_local(resets_at) else {
+        return "Unknown reset".to_string();
+    };
+    let Some(now_local) = native_interop::system_time_to_local(now) else {
+        return format_precise_reset_time(Some(resets_at))
+            .unwrap_or_else(|| "Unknown reset".to_string());
+    };
+    let remaining_secs = resets_at
+        .duration_since(now)
+        .ok()
+        .map(|duration| duration.as_secs());
+    format_humanized_reset_label(local, now_local, remaining_secs)
+}
+
+fn format_humanized_reset_label(
+    local: SYSTEMTIME,
+    now_local: SYSTEMTIME,
+    remaining_secs: Option<u64>,
+) -> String {
+    let date = if local.wYear == now_local.wYear
+        && local.wMonth == now_local.wMonth
+        && local.wDay == now_local.wDay
+    {
+        "Today".to_string()
+    } else {
+        format!("{} {}", tooltip_month_name(local.wMonth), local.wDay)
+    };
+    format!(
+        "{date}, {:02}:{:02} · {}",
+        local.wHour,
+        local.wMinute,
+        format_tooltip_relative(remaining_secs),
+    )
+}
+
+fn tooltip_month_name(month: u16) -> &'static str {
+    match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "Unknown",
+    }
+}
+
+fn format_tooltip_relative(remaining_secs: Option<u64>) -> String {
+    let Some(seconds) = remaining_secs else {
+        return "unknown".to_string();
+    };
+    if seconds >= 86_400 {
+        format!("in {}d", seconds / 86_400)
+    } else if seconds >= 3_600 {
+        format!("in {}h", seconds / 3_600)
+    } else if seconds >= 60 {
+        format!("in {}m", seconds / 60)
+    } else {
+        "now".to_string()
+    }
 }
 
 fn update_tooltip_hover(hwnd: HWND, account_id: Option<String>) {
@@ -3161,7 +3284,7 @@ fn update_tooltip_hover(hwnd: HWND, account_id: Option<String>) {
         }
         state.tooltip_pending_account_id = None;
         state.tooltip_visible_account_id = None;
-        state.tooltip_text.clear();
+        state.tooltip_content = None;
         return;
     }
 
@@ -3180,7 +3303,7 @@ fn update_tooltip_hover(hwnd: HWND, account_id: Option<String>) {
 }
 
 fn show_pending_tooltip(hwnd: HWND) {
-    let (account_id, text, existing_tooltip) = {
+    let (account_id, content, existing_tooltip) = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
             return;
@@ -3188,10 +3311,10 @@ fn show_pending_tooltip(hwnd: HWND) {
         let Some(account_id) = state.tooltip_pending_account_id.clone() else {
             return;
         };
-        let Some(text) = account_tooltip_text(state, &account_id) else {
+        let Some(content) = account_tooltip_content(state, &account_id) else {
             return;
         };
-        (account_id, text, state.tooltip_hwnd)
+        (account_id, content, state.tooltip_hwnd)
     };
 
     unsafe {
@@ -3209,7 +3332,7 @@ fn show_pending_tooltip(hwnd: HWND) {
         if GetWindowRect(hwnd, &mut main_rect).is_err() {
             return;
         }
-        (main_rect, sc(286), sc(122))
+        (main_rect, sc(TOOLTIP_WIDTH), sc(TOOLTIP_HEIGHT))
     };
     let x = main_rect.left;
     let mut y = main_rect.top - tooltip_height - sc(6);
@@ -3227,7 +3350,7 @@ fn show_pending_tooltip(hwnd: HWND) {
         }
         state.tooltip_hwnd = Some(tooltip_hwnd);
         state.tooltip_visible_account_id = Some(account_id);
-        state.tooltip_text = text;
+        state.tooltip_content = Some(content);
     }
 
     unsafe {
@@ -3300,14 +3423,16 @@ unsafe extern "system" fn tooltip_wnd_proc(
 }
 
 fn paint_tooltip(hdc: HDC, hwnd: HWND) {
-    let (is_dark, text) = {
+    let (is_dark, content) = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
             return;
         };
-        (state.is_dark, state.tooltip_text.clone())
+        let Some(content) = state.tooltip_content.clone() else {
+            return;
+        };
+        (state.is_dark, content)
     };
-    let mut text_wide: Vec<u16> = text.encode_utf16().collect();
     unsafe {
         let mut rect = RECT::default();
         let _ = GetClientRect(hwnd, &mut rect);
@@ -3315,11 +3440,6 @@ fn paint_tooltip(hdc: HDC, hwnd: HWND) {
             Color::from_hex("#202020")
         } else {
             Color::from_hex("#F8F8F8")
-        };
-        let foreground = if is_dark {
-            Color::from_hex("#F2F2F2")
-        } else {
-            Color::from_hex("#1F1F1F")
         };
         let border = if is_dark {
             Color::from_hex("#4A4A4A")
@@ -3364,19 +3484,159 @@ fn paint_tooltip(hdc: HDC, hwnd: HWND) {
         );
         let old_font = SelectObject(hdc, font);
         let _ = SetBkMode(hdc, TRANSPARENT);
-        let _ = SetTextColor(hdc, COLORREF(foreground.to_colorref()));
-        rect.left += sc(10);
-        rect.top += sc(8);
-        rect.right -= sc(10);
-        rect.bottom -= sc(8);
-        let _ = DrawTextW(
+        let primary = usage_primary_text_color(is_dark);
+        let secondary = usage_secondary_text_color(is_dark);
+        draw_tooltip_text_line(
             hdc,
-            &mut text_wide,
-            &mut rect,
-            DT_LEFT | DT_TOP | DT_WORDBREAK,
+            rect.left + sc(TOOLTIP_LABEL_X),
+            rect.top + sc(8),
+            rect.right - sc(TOOLTIP_LABEL_X),
+            rect.top + sc(24),
+            &content.title,
+            &primary,
+            false,
         );
+        draw_tooltip_text_line(
+            hdc,
+            rect.left + sc(TOOLTIP_LABEL_X),
+            rect.top + sc(25),
+            rect.right - sc(TOOLTIP_LABEL_X),
+            rect.top + sc(41),
+            &content.role,
+            &secondary,
+            false,
+        );
+        draw_tooltip_text_line(
+            hdc,
+            rect.left + sc(TOOLTIP_LABEL_X),
+            rect.top + sc(45),
+            rect.right - sc(TOOLTIP_LABEL_X),
+            rect.top + sc(61),
+            "Usage remaining",
+            &secondary,
+            false,
+        );
+        draw_tooltip_columns(
+            hdc,
+            rect.left,
+            rect.top + sc(62),
+            "5h",
+            &content.session_percent,
+            &content.session_reset,
+            &primary,
+            &secondary,
+        );
+        draw_tooltip_columns(
+            hdc,
+            rect.left,
+            rect.top + sc(80),
+            "Weekly",
+            &content.weekly_percent,
+            &content.weekly_reset,
+            &primary,
+            &secondary,
+        );
+        draw_tooltip_text_line(
+            hdc,
+            rect.left + sc(TOOLTIP_LABEL_X),
+            rect.top + sc(103),
+            rect.right - sc(TOOLTIP_LABEL_X),
+            rect.top + sc(119),
+            &content.status,
+            &primary,
+            false,
+        );
+        if let Some(note) = content.note.as_deref() {
+            draw_tooltip_text_line(
+                hdc,
+                rect.left + sc(TOOLTIP_LABEL_X),
+                rect.top + sc(120),
+                rect.right - sc(TOOLTIP_LABEL_X),
+                rect.bottom - sc(8),
+                note,
+                &secondary,
+                true,
+            );
+        }
         SelectObject(hdc, old_font);
         let _ = DeleteObject(font);
+    }
+}
+
+fn tooltip_column_positions() -> (i32, i32, i32) {
+    (TOOLTIP_LABEL_X, TOOLTIP_PERCENT_X, TOOLTIP_RESET_X)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_tooltip_columns(
+    hdc: HDC,
+    origin_x: i32,
+    y: i32,
+    label: &str,
+    percentage: &str,
+    reset: &str,
+    primary: &Color,
+    secondary: &Color,
+) {
+    let (label_x, percentage_x, reset_x) = tooltip_column_positions();
+    draw_tooltip_text_line(
+        hdc,
+        origin_x + sc(label_x),
+        y,
+        origin_x + sc(percentage_x),
+        y + sc(16),
+        label,
+        primary,
+        false,
+    );
+    draw_tooltip_text_line(
+        hdc,
+        origin_x + sc(percentage_x),
+        y,
+        origin_x + sc(reset_x),
+        y + sc(16),
+        percentage,
+        primary,
+        false,
+    );
+    draw_tooltip_text_line(
+        hdc,
+        origin_x + sc(reset_x),
+        y,
+        origin_x + sc(TOOLTIP_WIDTH - TOOLTIP_LABEL_X),
+        y + sc(16),
+        reset,
+        secondary,
+        false,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_tooltip_text_line(
+    hdc: HDC,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    text: &str,
+    color: &Color,
+    wrap: bool,
+) {
+    let mut text_wide: Vec<u16> = text.encode_utf16().collect();
+    let mut rect = RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    unsafe {
+        let _ = SetTextColor(hdc, COLORREF(color.to_colorref()));
+        let flags = if wrap {
+            DT_LEFT | DT_TOP | DT_WORDBREAK
+        } else {
+            DT_LEFT | DT_TOP | DT_SINGLELINE
+        };
+        let _ = DrawTextW(hdc, &mut text_wide, &mut rect, flags);
     }
 }
 
@@ -6601,6 +6861,8 @@ mod tests {
             usage: None,
             usage_stale: false,
             connection_state: account::ConnectionState::Connected,
+            last_error: None,
+            monitor_owned: !current_only,
             active,
             current_only,
         }
@@ -6714,18 +6976,132 @@ mod tests {
             usage: Some(usage),
             usage_stale: false,
             connection_state: account::ConnectionState::Connected,
+            last_error: None,
+            monitor_owned: true,
             active: true,
             current_only: false,
         };
 
-        let tooltip = account_tooltip_text_for(&account);
+        let tooltip = account_tooltip_content_for(&account);
 
-        assert!(tooltip.contains("Alice  ACTIVE"));
-        assert!(tooltip.contains("Current Codex account · Monitored account"));
-        assert!(tooltip.contains("19%"));
-        assert!(tooltip.contains("45%"));
-        assert!(tooltip.contains("Connected"));
-        assert!(!tooltip.contains("opaque-account-id"));
+        assert_eq!(tooltip.title, "Alice  ACTIVE");
+        assert_eq!(tooltip.role, "Current Codex account · Monitored account");
+        assert_eq!(tooltip.session_percent, "19%");
+        assert_eq!(tooltip.weekly_percent, "45%");
+        assert_eq!(tooltip.status, "Connected");
+        assert!(!tooltip.title.contains("opaque-account-id"));
+    }
+
+    #[test]
+    fn tooltip_reset_uses_human_date_and_relative_countdown() {
+        let now = SYSTEMTIME {
+            wYear: 2026,
+            wMonth: 9,
+            wDay: 1,
+            wHour: 10,
+            wMinute: 17,
+            ..Default::default()
+        };
+        let today = SYSTEMTIME {
+            wYear: 2026,
+            wMonth: 9,
+            wDay: 1,
+            wHour: 13,
+            wMinute: 17,
+            ..Default::default()
+        };
+        let later = SYSTEMTIME {
+            wYear: 2026,
+            wMonth: 9,
+            wDay: 7,
+            wHour: 14,
+            wMinute: 22,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            format_humanized_reset_label(today, now, Some(3 * 3_600)),
+            "Today, 13:17 · in 3h"
+        );
+        assert_eq!(
+            format_humanized_reset_label(later, now, Some(6 * 86_400)),
+            "Sep 7, 14:22 · in 6d"
+        );
+    }
+
+    #[test]
+    fn tooltip_columns_use_fixed_positions_without_monospace_padding() {
+        let (label_x, percentage_x, reset_x) = tooltip_column_positions();
+        assert_eq!((label_x, percentage_x, reset_x), (10, 72, 112));
+        assert!(label_x < percentage_x);
+        assert!(percentage_x < reset_x);
+    }
+
+    #[test]
+    fn tooltip_distinguishes_ownerless_active_from_inactive_and_transient_states() {
+        let mut active_ownerless = render_account("active", Some('A'), true, false);
+        active_ownerless.monitor_owned = false;
+        active_ownerless.connection_state = account::ConnectionState::ReauthRequired;
+        assert_eq!(
+            tooltip_connection_status(&active_ownerless),
+            (
+                "Connected via Codex".to_string(),
+                Some("Re-authenticate to keep monitoring when inactive".to_string())
+            )
+        );
+
+        active_ownerless.active = false;
+        assert_eq!(
+            tooltip_connection_status(&active_ownerless),
+            ("Re-authentication required".to_string(), None)
+        );
+
+        active_ownerless.active = true;
+        active_ownerless.connection_state = account::ConnectionState::Unavailable;
+        active_ownerless.last_error = Some("network_unavailable".to_string());
+        assert_eq!(
+            tooltip_connection_status(&active_ownerless),
+            ("Unavailable".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn monitor_owner_stays_attached_when_active_role_moves_between_accounts() {
+        let mut registry = account::AccountRegistry::empty();
+        for (id, name, owner) in [("account-a", "Alice", 1), ("account-b", "Bob", 2)] {
+            let identity = account::AccountIdentity {
+                id: id.to_string(),
+                display_name: Some(name.to_string()),
+                username: None,
+                email: None,
+            };
+            registry
+                .try_add(account::MonitoredAccount::from_identity(
+                    &identity,
+                    Some(account::MonitorAuthHandle::new(owner).unwrap()),
+                ))
+                .unwrap();
+        }
+        let current_b = account::AccountIdentity {
+            id: "account-b".to_string(),
+            display_name: Some("Bob".to_string()),
+            username: None,
+            email: None,
+        };
+
+        let rendered = account_render_data_for(&registry, Some(&current_b), None, false);
+
+        assert!(!rendered[0].active);
+        assert!(rendered[1].active);
+        assert!(rendered.iter().all(|account| account.monitor_owned));
+        assert_eq!(
+            registry.accounts()[0].auth_handle,
+            account::MonitorAuthHandle::new(1)
+        );
+        assert_eq!(
+            registry.accounts()[1].auth_handle,
+            account::MonitorAuthHandle::new(2)
+        );
     }
 
     #[test]
