@@ -1578,8 +1578,8 @@ const CIRCLE_DIAMETER: i32 = 12;
 const CIRCLE_STROKE: i32 = 2;
 const CIRCLE_LABEL_RIGHT_MARGIN: i32 = 4;
 const CIRCLE_INDICATOR_RIGHT_MARGIN: i32 = 4;
-const ACCOUNT_INITIAL_DIAMETER: i32 = 20;
-const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 22;
+const ACCOUNT_INITIAL_DIAMETER: i32 = 24;
+const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 26;
 const ACCOUNT_INITIAL_GAP: i32 = 4;
 const ACCOUNT_BLOCK_GAP: i32 = 8;
 const ACCOUNT_TEXT_EXTRA_WIDTH: i32 = 8;
@@ -6899,8 +6899,8 @@ mod tests {
 
     #[test]
     fn account_initial_chip_is_larger_without_collapsing_text_spacing() {
-        assert_eq!(ACCOUNT_INITIAL_DIAMETER, 20);
-        assert_eq!(ACCOUNT_INITIAL_SLOT_WIDTH, 22);
+        assert_eq!(ACCOUNT_INITIAL_DIAMETER, 24);
+        assert_eq!(ACCOUNT_INITIAL_SLOT_WIDTH, 26);
         assert_eq!(
             account_identity_slot_width(),
             sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP)
