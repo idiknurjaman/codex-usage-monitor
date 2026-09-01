@@ -61,6 +61,7 @@ Evidence must be current to the exact implementation checkpoint under review. Hi
 | UI-15 | DPI | 100/125/150/200% smoke test | No material clipping/overlap in accepted layouts | Class F/S — PASS for scalable geometry; no deliberate owner multi-DPI walkthrough claimed |
 | UI-16 | Taskbar | Drag/multi-monitor placement | Existing placement behavior preserved | pending |
 | UI-17 | Shell | Explorer/taskbar restart | Widget recovers using existing reliability mechanism | pending |
+| UI-18 | Theme | Tooltip/menu theme | Tooltip has no visible stroke; native HMENU follows Windows light/dark theme when supported and falls back safely | Class S — PASS: rounded tooltip region has no paint stroke; UxTheme opt-in is dynamic with native fallback; Class R light/dark visual check pending |
 | ARCH-01 | Account shape | Inspect account/auth types | No capacity encoded as `Slot1|Slot2|Slot3|Slot4` variants | pending |
 | ARCH-02 | Routing | Inspect lifecycle/menu/poll/render code | No `account_a/b`, per-slot poll functions, or fixed per-slot command branches | pending |
 | ARCH-03 | Policy | Inspect capacity enforcement | Max four retained accounts enforced as policy/validation | pending |

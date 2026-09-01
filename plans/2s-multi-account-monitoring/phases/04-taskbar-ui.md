@@ -56,6 +56,8 @@ Requirements:
 - tooltip is informational; account actions remain in the context menu;
 - use a small hover delay/stability behavior appropriate to a native taskbar utility so moving within the same account block does not flicker the tooltip;
 - tooltip remains account-scoped when multiple account blocks are adjacent.
+- preserve the rounded tooltip window and palette without drawing any visible
+  border/stroke.
 
 ## Accounts context-menu UI
 
@@ -86,6 +88,9 @@ Requirements:
 - no fixed per-slot command IDs/branches; action dispatch maps dynamically to account identity/owner;
 - `Add monitor account...` is disabled at four retained accounts or during conflicting lifecycle operations;
 - no separate `Manage accounts >` submenu.
+- keep the native `HMENU`/`TrackPopupMenu` architecture and follow the Windows
+  light/dark theme; any undocumented UxTheme opt-in must be dynamically
+  feature-detected with native behavior as the fallback.
 
 ## Collection and capacity layout
 
@@ -122,6 +127,8 @@ Circle direction remains compact and monotonic with remaining quota.
 - [x] Recalculate taskbar width/DPI behavior at 100%, 125%, 150%, and 200%.
 - [x] Preserve drag/taskbar embedding and multi-monitor behavior.
 - [x] Capture required screenshots/runtime artifacts.
+- [x] Remove the visible tooltip stroke while preserving the rounded window region.
+- [x] Opt native popup menus into the system theme through feature-detected UxTheme exports with a native fallback.
 
 ## Acceptance criteria
 

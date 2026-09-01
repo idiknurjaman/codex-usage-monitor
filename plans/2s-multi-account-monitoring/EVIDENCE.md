@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `10afd36e9495b0c59571e70bf593af9a19d5a7ec`.
+Implementation checkpoint: `e6722e46e27be2e5ca114c71b169e4315dd824dd`.
 Phase 04 source and deterministic visual/state evidence are complete. Sidik's
 owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
 remains ready for Sol final-gate reconciliation.
@@ -622,6 +622,14 @@ remains ready for Sol final-gate reconciliation.
 - Existing direct collection-driven account menus and `Widget Style > Bar |
   Circle` persistence remain in place; this phase does not change their
   auth/polling behavior.
+- Tooltip painting now uses the existing rounded window region and palette
+  fill without drawing a visible border/stroke.
+- Native context menus remain classic `HMENU`/`TrackPopupMenu`. Before menu
+  construction, the app dynamically resolves UxTheme ordinals 135
+  (`SetPreferredAppMode`) and 136 (`FlushMenuThemes`), selects `AllowDark` so
+  the popup follows the Windows theme, and flushes menu themes. If the DLL or
+  either export is unavailable, the resolver returns `Unsupported` and leaves
+  standard native menu behavior unchanged; no owner-draw menu path was added.
 
 #### Class F — deterministic visual/state proof
 
@@ -642,6 +650,8 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | `window::tests::monitor_owner_stays_attached_when_active_role_moves_between_accounts` | Independent monitor owners remain attached while runtime active role moves to another identity. |
 | Existing `window::tests::widget_style_serializes_and_defaults_to_bar` | Bar remains the default and Circle remains persisted through settings serialization. |
 | Existing menu/routing tests | Direct per-account submenu, dynamic stable-identity routing, max-four Add disablement, and no fixed-slot command path remain green. |
+| `theme::tests::native_popup_theme_uses_feature_detected_uxtheme_exports` | Pins the reviewed ordinal/mode contract used for the dynamic native popup-menu opt-in. |
+| `theme::tests::native_popup_theme_missing_export_uses_native_fallback` | Deterministically proves any missing UxTheme export selects explicit `Unsupported` fallback while the complete export pair selects `Applied`. |
 
 #### Visual artifacts
 
@@ -679,6 +689,21 @@ behavior.
 | Humanized reset and fixed tooltip columns | PASS | Reset labels were accepted in humanized local date/relative form and columns aligned visually. |
 | Account-scoped tooltip/privacy and direct menu | PASS | Current and monitored tooltips remained account-scoped and privacy-safe; direct Accounts menu remained correct. |
 | Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
+| Tooltip border removal | NOT YET OWNER-VERIFIED | Source removes the paint stroke while preserving the rounded region; visual owner confirmation is still required. |
+| Native menu theme | NOT YET OWNER-VERIFIED | Source dynamically opts classic native menus into system theme when UxTheme support exists; light/dark visual behavior still needs owner runtime confirmation. |
+
+#### Theme runtime smoke
+
+The alternate release binary from this source correction reached the native
+context-menu path on the current Windows dark-theme environment and emitted the safe diagnostic
+`native popup menu theme result=Applied system_dark=true`. This proves the
+feature-detected runtime path was reached without owner-draw code or a second
+menu implementation. It is a runtime smoke result, not a visual owner
+acceptance claim: a separate existing 2S instance held the single-instance
+mutex when the rebuilt post-test binary was launched, and the shell capture
+helper could not capture desktop pixels. The light-theme path is covered by the
+system-following `AllowDark` contract and the explicit missing-export fallback
+tests; light/dark visual owner confirmation remains open for Sol/Sidik.
 
 No new runtime claim is made for Explorer/taskbar restart, four-account real
 cardinality, same-initial real accounts, or a deliberately exercised
@@ -688,11 +713,14 @@ not be treated as Phase 05 closure.
 #### Verification
 
 - `cargo fmt --check`: PASS.
-- `cargo test --locked`: PASS — 86 passed, 0 failed.
+- `cargo test --locked`: PASS — 89 passed, 0 failed.
 - `cargo clippy --all-targets --locked`: PASS exit; existing repository
   warnings remain, with no new compile error.
-- `cargo build --release`: PASS — default optimized release build after the
-  tooltip correction.
+- `CARGO_TARGET_DIR=<temp> cargo build --release --locked`: PASS — alternate
+  optimized release build at
+  `%TEMP%\codex-usage-phase04-theme-target\release\codex-usage.exe` after the
+  tooltip/theme correction. SHA-256:
+  `6D749161AF46A9E65AA6F71793C25A7A665A52654D2EA30578DC278E1D9E7EEE`.
 - `git diff --check`: PASS before checkpoint.
 
 #### Scope guard and disposition
