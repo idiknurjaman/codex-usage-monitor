@@ -23,7 +23,8 @@ pub enum NativePopupMenuThemeResult {
 
 const UTHEME_SET_PREFERRED_APP_MODE_ORDINAL: u16 = 135;
 const UTHEME_FLUSH_MENU_THEMES_ORDINAL: u16 = 136;
-const UTHEME_ALLOW_DARK_MODE: i32 = 1;
+const UTHEME_FORCE_DARK_MODE: i32 = 2;
+const UTHEME_FORCE_LIGHT_MODE: i32 = 3;
 
 type SetPreferredAppModeFn = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemesFn = unsafe extern "system" fn();
@@ -36,6 +37,14 @@ fn native_popup_menu_theme_result(
         NativePopupMenuThemeResult::Applied
     } else {
         NativePopupMenuThemeResult::Unsupported
+    }
+}
+
+fn preferred_app_mode_for_system_theme(is_dark: bool) -> i32 {
+    if is_dark {
+        UTHEME_FORCE_DARK_MODE
+    } else {
+        UTHEME_FORCE_LIGHT_MODE
     }
 }
 
@@ -71,9 +80,10 @@ pub fn apply_native_popup_menu_theme() -> NativePopupMenuThemeResult {
             std::mem::transmute(set_preferred_app_mode.unwrap());
         let flush_menu_themes: FlushMenuThemesFn = std::mem::transmute(flush_menu_themes.unwrap());
 
-        // AllowDark follows the Windows preference; it does not force this
-        // process into dark mode when the system is light.
-        set_preferred_app_mode(UTHEME_ALLOW_DARK_MODE);
+        // Force the native menu palette to the current Windows system theme.
+        // The value is selected from the current theme immediately before menu
+        // construction, so a light/dark setting change is picked up safely.
+        set_preferred_app_mode(preferred_app_mode_for_system_theme(is_dark_mode()));
         flush_menu_themes();
 
         NativePopupMenuThemeResult::Applied
@@ -131,7 +141,8 @@ mod tests {
     fn native_popup_theme_uses_feature_detected_uxtheme_exports() {
         assert_eq!(UTHEME_SET_PREFERRED_APP_MODE_ORDINAL, 135);
         assert_eq!(UTHEME_FLUSH_MENU_THEMES_ORDINAL, 136);
-        assert_eq!(UTHEME_ALLOW_DARK_MODE, 1);
+        assert_eq!(UTHEME_FORCE_DARK_MODE, 2);
+        assert_eq!(UTHEME_FORCE_LIGHT_MODE, 3);
     }
 
     #[test]
@@ -160,5 +171,11 @@ mod tests {
             native_popup_menu_theme_result(false, false),
             NativePopupMenuThemeResult::Unsupported
         );
+    }
+
+    #[test]
+    fn native_popup_theme_follows_the_system_palette() {
+        assert_eq!(preferred_app_mode_for_system_theme(true), 2);
+        assert_eq!(preferred_app_mode_for_system_theme(false), 3);
     }
 }

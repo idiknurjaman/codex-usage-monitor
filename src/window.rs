@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
 use windows::Win32::System::Registry::*;
@@ -3405,7 +3406,27 @@ fn create_tooltip_window(owner: HWND) -> Option<HWND> {
             None,
         )
         .ok()?;
+        let border_suppressed = suppress_tooltip_window_border(hwnd);
+        diagnose::log(format!(
+            "tooltip window border suppression={border_suppressed}"
+        ));
         Some(hwnd)
+    }
+}
+
+/// Suppress the Windows 11 DWM frame while retaining the rounded window region.
+/// Older Windows versions return an error for DWMWA_COLOR_NONE; the custom
+/// tooltip remains usable because the paint path does not draw a stroke.
+fn suppress_tooltip_window_border(hwnd: HWND) -> bool {
+    unsafe {
+        let color = DWMWA_COLOR_NONE;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        )
+        .is_ok()
     }
 }
 
@@ -5034,10 +5055,11 @@ fn resolve_account_menu_action(
 
 fn show_context_menu(hwnd: HWND) {
     unsafe {
+        let system_dark = theme::is_dark_mode();
         let popup_theme = theme::apply_native_popup_menu_theme();
         diagnose::log(format!(
-            "native popup menu theme result={popup_theme:?} system_dark={}",
-            theme::is_dark_mode()
+            "native popup menu theme result={popup_theme:?} system_dark={system_dark} preferred_mode={}",
+            if system_dark { "ForceDark" } else { "ForceLight" }
         ));
         {
             let mut state = lock_state();
