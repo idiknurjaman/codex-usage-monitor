@@ -1581,6 +1581,7 @@ const ACCOUNT_INITIAL_DIAMETER: i32 = 16;
 const ACCOUNT_INITIAL_SLOT_WIDTH: i32 = 18;
 const ACCOUNT_INITIAL_GAP: i32 = 4;
 const ACCOUNT_BLOCK_GAP: i32 = 8;
+const ACCOUNT_TEXT_EXTRA_WIDTH: i32 = 8;
 
 fn is_drag_handle_point(client_x: i32, client_y: i32) -> bool {
     let divider_h = sc(25);
@@ -1701,8 +1702,13 @@ fn account_identity_slot_width() -> i32 {
     sc(ACCOUNT_INITIAL_SLOT_WIDTH + ACCOUNT_INITIAL_GAP)
 }
 
+fn account_usage_text_width(language: LanguageId) -> i32 {
+    usage_layout_widths(language).1 + ACCOUNT_TEXT_EXTRA_WIDTH
+}
+
 fn account_block_width(language: LanguageId, widget_style: WidgetStyle) -> i32 {
-    let (label_width, text_width) = usage_layout_widths(language);
+    let (label_width, _) = usage_layout_widths(language);
+    let text_width = account_usage_text_width(language);
     let provider_width = if widget_style == WidgetStyle::Circle {
         circle_provider_width(text_width)
     } else {
@@ -2776,6 +2782,7 @@ fn draw_account_collection(
     let row2_y = row1_y + row_height + row_gap;
     let single_row_y = (height - row_height) / 2;
     let account_width = account_block_width(language, widget_style);
+    let account_text_width = account_usage_text_width(language);
     let show_non_codex = show_claude_code || show_antigravity;
     let display_remaining_in_chinese = language == LanguageId::SimplifiedChinese;
     let mut block_x = content_origin_x;
@@ -2820,7 +2827,7 @@ fn draw_account_collection(
                     is_dark,
                     strings.session_window,
                     label_width,
-                    text_width,
+                    account_text_width,
                     None,
                     "--",
                     account_session_pct,
@@ -2847,7 +2854,7 @@ fn draw_account_collection(
                     is_dark,
                     strings.weekly_window,
                     label_width,
-                    text_width,
+                    account_text_width,
                     None,
                     "--",
                     account_weekly_pct,
@@ -2888,7 +2895,7 @@ fn draw_account_collection(
                     antigravity_accent,
                     track,
                     label_width,
-                    text_width,
+                    account_text_width,
                 );
             }
             if show_weekly_window {
@@ -2916,7 +2923,7 @@ fn draw_account_collection(
                     antigravity_accent,
                     track,
                     label_width,
-                    text_width,
+                    account_text_width,
                 );
             }
         }
@@ -6878,6 +6885,39 @@ mod tests {
 
         assert!(widths.windows(2).all(|pair| pair[1] > pair[0]));
         assert_eq!(WIDGET_HEIGHT, 46);
+    }
+
+    #[test]
+    fn account_layout_reserves_width_for_two_digit_reset_countdown() {
+        let usage = crate::models::UsageData {
+            session: crate::models::UsageSection {
+                used_percentage: Some(48.0),
+                resets_at: Some(SystemTime::now() + Duration::from_secs(30 * 86_400)),
+            },
+            weekly: crate::models::UsageSection {
+                used_percentage: Some(48.0),
+                resets_at: Some(SystemTime::now() + Duration::from_secs(30 * 86_400)),
+            },
+        };
+        let strings = LanguageId::English.strings();
+        let (_, text) = account_usage_display(
+            Some(&usage),
+            strings,
+            false,
+            poller::UsageWindowKind::Weekly,
+        );
+        let secondary_column_width =
+            account_usage_text_width(LanguageId::English) - SECONDARY_TEXT_X;
+
+        assert!(
+            text.starts_with("52% · 29d"),
+            "unexpected countdown: {text}"
+        );
+        assert_eq!(
+            account_usage_text_width(LanguageId::English),
+            TEXT_WIDTH + 8
+        );
+        assert!(secondary_column_width >= 26);
     }
 
     #[test]
