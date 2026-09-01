@@ -3051,7 +3051,7 @@ fn account_usage_display(
         poller::UsageWindowKind::Weekly => &usage.weekly,
     };
     (
-        section.used_percentage,
+        section.used_percentage.map(poller::remaining_percentage),
         poller::format_remaining_line(section, strings, display_remaining_in_chinese, window),
     )
 }
@@ -6726,6 +6726,74 @@ mod tests {
         assert!(tooltip.contains("45%"));
         assert!(tooltip.contains("Connected"));
         assert!(!tooltip.contains("opaque-account-id"));
+    }
+
+    #[test]
+    fn account_bar_and_circle_use_remaining_percentage_for_fill() {
+        let usage = crate::models::UsageData {
+            session: crate::models::UsageSection {
+                used_percentage: Some(81.0),
+                resets_at: None,
+            },
+            weekly: crate::models::UsageSection {
+                used_percentage: Some(55.0),
+                resets_at: None,
+            },
+        };
+        let strings = LanguageId::English.strings();
+
+        let (session_percent, session_text) = account_usage_display(
+            Some(&usage),
+            strings,
+            false,
+            poller::UsageWindowKind::Session,
+        );
+        let (weekly_percent, weekly_text) = account_usage_display(
+            Some(&usage),
+            strings,
+            false,
+            poller::UsageWindowKind::Weekly,
+        );
+
+        assert_eq!(session_percent, Some(19.0));
+        assert_eq!(weekly_percent, Some(45.0));
+        assert!(session_text.starts_with("19%"));
+        assert!(weekly_text.starts_with("45%"));
+        assert_eq!(
+            account_usage_display(
+                Some(&crate::models::UsageData {
+                    session: crate::models::UsageSection {
+                        used_percentage: Some(0.0),
+                        resets_at: None,
+                    },
+                    weekly: crate::models::UsageSection {
+                        used_percentage: Some(100.0),
+                        resets_at: None,
+                    },
+                }),
+                strings,
+                false,
+                poller::UsageWindowKind::Session,
+            )
+            .0,
+            Some(100.0)
+        );
+        assert_eq!(
+            account_usage_display(
+                Some(&crate::models::UsageData {
+                    session: crate::models::UsageSection::default(),
+                    weekly: crate::models::UsageSection {
+                        used_percentage: Some(100.0),
+                        resets_at: None,
+                    },
+                }),
+                strings,
+                false,
+                poller::UsageWindowKind::Weekly,
+            )
+            .0,
+            Some(0.0)
+        );
     }
 
     #[test]
