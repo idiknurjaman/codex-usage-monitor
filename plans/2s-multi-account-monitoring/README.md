@@ -1,7 +1,7 @@
 # 2S Multi-Account Monitoring
 
 **Status:** `in-progress`
-**Current phase:** `04-taskbar-ui`
+**Current phase:** `05-resilience-acceptance`
 **Implementation branch:** `feat/2s-multi-account-monitoring`
 **Plan authored from checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 **Current product amendment baseline:** `ba7721d2bde2659e18e34db45757a4023dd4ecc8`
@@ -171,7 +171,7 @@ This means the max-four requirement remains mandatory, but Sidik is not required
 | 04 | [Taskbar UI](./phases/04-taskbar-ui.md) | Collection rendering, active indication, tooltip, direct account menu |
 | 05 | [Resilience & acceptance](./phases/05-resilience-acceptance.md) | Full Definition of Done and runtime acceptance |
 
-Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 implementation is ready for its Sol final gate; Phase 05 remains blocked until Phase 04 passes.
+Phases 00 and 01 have passed their historical Sol gates. Phase 02 has passed the amended Sol gate. Phase 03 has passed its Sol final gate. Phase 04 has passed its Sol final gate; Phase 05 is now active.
 
 ## Historical evidence disposition
 
@@ -232,10 +232,12 @@ cargo build --release
 git diff --check
 ```
 
-## Current Phase 04 status and next authorized action
+## Current Phase 05 status and next authorized action
 
 Phase 02 implementation checkpoint remains `537b2bbad951ccbb43f04ba9067b55b304f4d232`; its deterministic proof/test checkpoint is `2dd532525e48710dd03e4bea37819d052b117fc2`, and Sol has issued a PASS gate.
 
-Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 taskbar collection rendering is implemented and awaiting Sol final-gate review. The accepted Phase 00–03 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
+Phase 03 collection-driven polling implementation and owner-observed runtime evidence passed Sol's final gate. Phase 04 taskbar collection rendering and bounded owner-runtime evidence passed Sol's final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. The accepted Phase 00–04 auth mechanism, owner isolation, active-role boundary, and no-switching/no-inference constraints remain in force.
 
-Phase 04 is the only active phase and is now `READY FOR SOL FINAL GATE`. Do not begin Phase 05 until Sol issues Phase 04 PASS.
+Phase 05 is the only active phase and is now authorized. Reconcile the full
+test matrix against valid Phase 00–04 evidence first, then execute only Phase
+05 resilience/acceptance work.

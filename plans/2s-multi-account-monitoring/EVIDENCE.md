@@ -4,7 +4,7 @@
 
 - **Plan:** `2s-multi-account-monitoring`
 - **Lifecycle:** `in-progress`
-- **Current phase:** `04-taskbar-ui`
+- **Current phase:** `05-resilience-acceptance`
 - **Implementation branch:** `feat/2s-multi-account-monitoring`
 - **Plan authoring checkpoint:** `f5c090c58d45e12eed4c9f564733bf7a974a9ac1`
 - **Implementation checkpoint:** `1cda2b33c7ed30166f364b26687a8876d347865d`
@@ -21,7 +21,7 @@ Current branch already contains:
 - current-account initial derivation/rendering;
 - monotonic Circle remaining progress.
 
-Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling passed its Sol final gate; Phase 04 final collection taskbar UI is now active.
+Phase 02 amended account model and proof closure passed Sol review at the checkpoints above. Phase 03 multi-account polling passed its Sol final gate; Phase 04 final collection taskbar UI passed its Sol final gate at evidence HEAD `9a5bcb67310351d78318f9bfcee177251c2aa148`. Phase 05 is now active.
 
 ## Open findings / blockers
 
@@ -582,12 +582,13 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 ### Phase 04 — Taskbar UI
 
-**Status:** `ready-for-sol-final-gate`
+**Status:** `complete/PASS`
 
 Implementation checkpoint: `1cda2b33c7ed30166f364b26687a8876d347865d`.
 Phase 04 source and deterministic visual/state evidence are complete. Sidik's
-owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
-remains ready for Sol final-gate reconciliation.
+owner-runtime follow-up is accepted as bounded Class R evidence. Sol's Phase 04
+final gate is `PASS` at evidence HEAD
+`9a5bcb67310351d78318f9bfcee177251c2aa148`.
 
 #### Class S — source/UI state proof
 
@@ -752,12 +753,14 @@ still have a focused owner visual check open; Phase 05 remains blocked.
 
 ### Phase 05 — Resilience & Acceptance
 
-**Status:** `blocked-by-phase-04`
+**Status:** `active/in-progress`
 
-Evidence pending.
+Phase 05 is authorized after the Phase 04 PASS. Reconcile the entire test
+matrix against valid Phase 00–04 evidence before adding new runtime proof.
 
 ## Final audit
 
-**Sol verdict:** `Phase 03 PASS; Phase 04 ready for Sol final gate`
+**Sol verdict:** `Phase 04 PASS; Phase 05 active`
 
-Do not change this to PASS until the final implementation checkpoint has current TEST-MATRIX evidence and Sidik runtime acceptance.
+Do not close the plan until Phase 05 has current TEST-MATRIX evidence and Sol's
+final audit.

@@ -1,7 +1,15 @@
 # Phase 05 — Resilience & Acceptance
 
-**Status:** `blocked-by-phase-04`
+**Status:** `active/in-progress`
 **Goal:** prove the amended collection-driven monitor is safe, restart-stable, failure-isolated, visually accepted, and ready for merge/release consideration under the max-four retained-account product policy.
+
+## Current authority
+
+Phase 04 passed Sol's final gate at evidence HEAD
+`9a5bcb67310351d78318f9bfcee177251c2aa148`. Reconcile the full test matrix
+against valid Phase 00–04 evidence before executing new runtime work. Phase 05
+must focus on genuinely open resilience/acceptance items, especially UI-16
+taskbar drag/multi-monitor placement and UI-17 Explorer/taskbar restart.
 
 ## Required verification
 

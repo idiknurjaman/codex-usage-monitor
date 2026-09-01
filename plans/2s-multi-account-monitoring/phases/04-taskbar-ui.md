@@ -1,6 +1,6 @@
 # Phase 04 — Taskbar UI
 
-**Status:** `ready-for-sol-final-gate`
+**Status:** `complete/PASS`
 **Goal:** render the account collection cleanly in the existing native taskbar widget, distinguish the runtime current Codex account without clutter, and provide compact account detail through whole-block hover.
 
 ## Preconditions
@@ -176,5 +176,7 @@ outside this plan and is non-blocking. UI-16 drag/multi-monitor and UI-17
 Explorer/taskbar restart remain pending for Phase 05 resilience/acceptance and
 are excluded from this Phase 04 closure claim.
 
-Phase 04 remains `ready-for-sol-final-gate`; this document does not mark Phase
-04 `PASS`.
+Sol final gate: `PASS` at evidence HEAD
+`9a5bcb67310351d78318f9bfcee177251c2aa148`. UI-16 drag/multi-monitor and
+UI-17 Explorer/taskbar restart remain Phase 05 resilience/acceptance items and
+are not included in this Phase 04 gate.
