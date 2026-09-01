@@ -584,7 +584,7 @@ accepted this Phase 03 evidence and authorized Phase 04.
 
 **Status:** `ready-for-sol-final-gate`
 
-Implementation checkpoint: `e72f3d4dddabd312161f5fbf4a3f5fa92d546aaa`.
+Implementation checkpoint: `6239045303392bf3bc180ba46def915f28b18fcd`.
 Phase 04 source and deterministic visual/state evidence are complete. Sidik's
 owner-runtime follow-up is accepted as bounded Class R evidence; Phase 04
 remains ready for Sol final-gate reconciliation.
@@ -606,7 +606,7 @@ remains ready for Sol final-gate reconciliation.
 - Active state is derived by stable identity matching. The active identity chip
   uses a blue outline/ring; inactive chips use the neutral outline. No active
   role is persisted and no account switching control was added.
-- The account identity chip is 18 px in the compact taskbar layout, with a 20
+- The account identity chip is 20 px in the compact taskbar layout, with a 22
   px identity slot preserving spacing before the quota rows; widget height
   remains unchanged.
 - Unavailable or stale account usage renders as `--`; missing windows remain
@@ -660,7 +660,7 @@ access tokens, refresh tokens, keyring credentials, or production auth files.
 | `theme::tests::native_popup_theme_uses_feature_detected_uxtheme_exports` | Pins the reviewed ordinal/mode contract used for the dynamic native popup-menu opt-in. |
 | `theme::tests::native_popup_theme_missing_export_uses_native_fallback` | Deterministically proves any missing UxTheme export selects explicit `Unsupported` fallback while the complete export pair selects `Applied`. |
 | `theme::tests::native_popup_theme_follows_the_system_palette` | Proves dark Windows selects UxTheme `ForceDark` and light Windows selects `ForceLight`. |
-| `window::tests::account_initial_chip_is_larger_without_collapsing_text_spacing` | Proves the 18 px initial chip remains centered within the 46 px widget and retains a larger identity slot than the chip diameter. |
+| `window::tests::account_initial_chip_is_larger_without_collapsing_text_spacing` | Proves the 20 px initial chip remains centered within the 46 px widget and retains a larger identity slot than the chip diameter. |
 
 #### Visual artifacts
 
@@ -700,7 +700,7 @@ behavior.
 | Representative real taskbar interaction | PASS | Owner accepted the representative taskbar interaction on Windows. |
 | Tooltip border removal | NOT YET OWNER-VERIFIED | Source removes the paint stroke while preserving the rounded region; visual owner confirmation is still required. |
 | Native menu theme | NOT YET OWNER-VERIFIED | Source dynamically opts classic native menus into system theme when UxTheme support exists; light/dark visual behavior still needs owner runtime confirmation. |
-| Larger account initial chip | NOT YET OWNER-VERIFIED | Source/test proof confirms 18 px sizing and preserved spacing; owner visual confirmation is still required. |
+| Larger account initial chip | NOT YET OWNER-VERIFIED | Source/test proof confirms 20 px sizing and preserved spacing; owner visual confirmation is still required. |
 
 #### Theme runtime smoke
 
@@ -743,7 +743,7 @@ Phase 05 remains blocked.
 
 **Decision:** `READY FOR SOL FINAL GATE` — Class R owner-runtime PASS bounded
 plus Class F/S UI implementation and deterministic evidence are complete
-at `e72f3d4dddabd312161f5fbf4a3f5fa92d546aaa`. The new tooltip-frame,
+at `6239045303392bf3bc180ba46def915f28b18fcd`. The new tooltip-frame,
 native-menu theme, and larger identity-chip behavior
 still have a focused owner visual check open; Phase 05 remains blocked.
 
