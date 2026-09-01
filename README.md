@@ -56,7 +56,7 @@ For a per-user installation, download `install.ps1` from the [latest release](ht
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer verifies the release SHA256 and installs to `%LOCALAPPDATA%\Programs\CodexUsage` without administrator access. It adds a Start menu shortcut and an entry in Windows Installed Apps.
+The installer verifies the release SHA256 and installs to `%LOCALAPPDATA%\CodexUsage` without administrator access. It adds a Start menu shortcut and an entry in Windows Installed Apps.
 
 For portable use, download `codex-usage.exe` from the same release and run it from any user-writable directory. You can also build it locally:
 
@@ -71,7 +71,7 @@ Local builds create the executable at `target\release\codex-usage.exe`.
 Uninstall **Codex Usage** from Windows Settings > Apps > Installed apps, or run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\CodexUsage\uninstall.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexUsage\uninstall.ps1"
 ```
 
 Uninstalling preserves `%APPDATA%\CodexUsage\settings.json`. Add `-RemoveSettings` to delete settings explicitly. See [Installation model](docs/installation.md) for upgrade, portable, startup, and WinGet behavior.

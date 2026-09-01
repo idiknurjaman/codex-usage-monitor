@@ -4,13 +4,13 @@ Codex Usage remains a single native Windows executable. Installation only places
 
 ## Direct installation
 
-- Install directory: `%LOCALAPPDATA%\Programs\CodexUsage`
-- Executable: `%LOCALAPPDATA%\Programs\CodexUsage\codex-usage.exe`
-- Uninstall helper: `%LOCALAPPDATA%\Programs\CodexUsage\uninstall.ps1`
+- Install directory: `%LOCALAPPDATA%\CodexUsage`
+- Executable: `%LOCALAPPDATA%\CodexUsage\codex-usage.exe`
+- Uninstall helper: `%LOCALAPPDATA%\CodexUsage\uninstall.ps1`
 - Start menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Codex Usage.lnk`
 - Add/Remove Programs key: `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexUsage`
 
-The installer is per-user and does not request elevation. It verifies the release SHA256 before replacing an existing executable. Replacement uses a temporary file and keeps the previous executable until the new file has been placed successfully.
+The installer is per-user and does not request elevation. It verifies the release SHA256 before replacing an existing executable. Replacement uses a temporary file and keeps the previous executable until the new file has been placed successfully. It also removes the prior managed `%LOCALAPPDATA%\Programs\CodexUsage` directory only when it contains the expected installer artifacts; unexpected contents are preserved and reported.
 
 ## Portable mode
 
@@ -19,7 +19,7 @@ The installer is per-user and does not request elevation. It verifies the releas
 ## Settings and startup behavior
 
 - Upgrades preserve `%APPDATA%\CodexUsage\settings.json`.
-- Normal uninstall preserves settings so a later reinstall restores preferences.
+- Normal uninstall preserves settings and the `%LOCALAPPDATA%\CodexUsage\monitor-auth` / auth-state directories so a later reinstall restores preferences and monitor ownership.
 - `uninstall.ps1 -RemoveSettings` explicitly deletes the settings directory.
 - The installer does not enable startup automatically. If startup was already enabled, installation preserves that choice and updates the registry value to the stable installed executable. Users otherwise control startup from the application's settings menu.
 - Uninstall removes the `CodexUsage` startup entry because its executable no longer exists.

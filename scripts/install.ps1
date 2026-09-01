@@ -12,9 +12,17 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Repository = 'upstream-ray/codex-usage-monitor'
-$InstallDirectory = Join-Path $env:LOCALAPPDATA 'Programs\CodexUsage'
+$InstallDirectory = Join-Path $env:LOCALAPPDATA 'CodexUsage'
 $TargetPath = Join-Path $InstallDirectory 'codex-usage.exe'
 $InstalledUninstaller = Join-Path $InstallDirectory 'uninstall.ps1'
+$LegacyInstallDirectory = Join-Path $env:LOCALAPPDATA 'Programs\CodexUsage'
+$LegacyTargetPath = Join-Path $LegacyInstallDirectory 'codex-usage.exe'
+$ManagedInstallNames = @(
+    'codex-usage.exe',
+    'uninstall.ps1',
+    'codex-usage.exe.new',
+    'codex-usage.exe.old'
+)
 $ShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Codex Usage.lnk'
 $DesktopShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Usage.lnk'
 $UninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexUsage'
@@ -53,6 +61,44 @@ function Invoke-ReleaseDownload {
     )
 
     Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'CodexUsage-Installer' } -Uri $Url -OutFile $Destination
+}
+
+function Stop-InstalledProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExecutablePath
+    )
+
+    Get-Process -Name 'codex-usage' -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            try {
+                if ([String]::Equals($_.Path, $ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) {
+                    Stop-Process -Id $_.Id -Force
+                }
+            }
+            catch {
+                # Fall through to the CIM lookup below when Process.Path is unavailable.
+            }
+        }
+
+    Get-CimInstance Win32_Process -Filter "Name='codex-usage.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { [String]::Equals($_.ExecutablePath, $ExecutablePath, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+}
+
+function Remove-LegacyManagedInstall {
+    if (-not (Test-Path -LiteralPath $LegacyInstallDirectory -PathType Container)) {
+        return $true
+    }
+
+    $unexpected = @(Get-ChildItem -LiteralPath $LegacyInstallDirectory -Force -ErrorAction Stop |
+        Where-Object { $_.Name -notin $ManagedInstallNames })
+    if ($unexpected.Count -gt 0) {
+        Write-Warning "Legacy install directory was not removed because it contains unexpected entries: $($unexpected.FullName -join ', ')"
+        return $false
+    }
+
+    Remove-Item -LiteralPath $LegacyInstallDirectory -Recurse -Force
+    return -not (Test-Path -LiteralPath $LegacyInstallDirectory -PathType Container)
 }
 
 New-Item -ItemType Directory -Force -Path $TempDirectory | Out-Null
@@ -103,9 +149,10 @@ try {
 
     New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
 
-    Get-CimInstance Win32_Process -Filter "Name='codex-usage.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -eq $TargetPath } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Stop-InstalledProcess -ExecutablePath $TargetPath
+    if ($LegacyTargetPath -ne $TargetPath) {
+        Stop-InstalledProcess -ExecutablePath $LegacyTargetPath
+    }
 
     $NewPath = "$TargetPath.new"
     $BackupPath = "$TargetPath.old"
@@ -183,6 +230,7 @@ try {
         throw
     }
 
+    $LegacyCleanupSucceeded = Remove-LegacyManagedInstall
     Remove-Item -LiteralPath $BackupPath -Force -ErrorAction SilentlyContinue
 
     if (-not $NoLaunch) {
@@ -191,6 +239,7 @@ try {
 
     Write-Output "Codex Usage $InstalledVersion installed to $InstallDirectory"
     Write-Output "SHA256: $ActualSha256"
+    Write-Output "Legacy managed install cleanup: $LegacyCleanupSucceeded"
 }
 finally {
     $ExpectedTempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
